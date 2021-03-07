@@ -1,0 +1,15 @@
+name: dnn-project
+channels:
+- pytorch
+dependencies:
+- cudatoolkit
+- pip
+- python=3.8
+- pytorch=1.7
+- torchvision
+- pip:
+  - kornia
+  - loguru
+  - mlconfig
+  - opencv-python
+  - tqdm
