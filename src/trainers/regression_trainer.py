@@ -71,7 +71,6 @@ class RegressionTrainer():
         early_stop_count = 0
 
         for self.epoch in pbar:
-            train_loss = []
             for data in self.train_dataset:
                 data_dict = self.prepare_data(data)
 
@@ -81,15 +80,16 @@ class RegressionTrainer():
                 loss.backward()
                 self.optimzer.step()
 
-                train_loss.append(loss.item())
-
-            train_loss = np.mean(train_loss)
-            valid_loss = self.evaluate()
+            train_loss, train_metric = self.evaluate(self.train_dataset)
+            valid_loss, valid_metric = self.evaluate(self.valid_dataset)
 
             self.scheduler.step()
 
             self.exp_logger.log_metric("train_loss", train_loss, self.epoch)
             self.exp_logger.log_metric("valid_loss", valid_loss, self.epoch)
+
+            self.exp_logger.log_metric("train_metric", train_metric, self.epoch)
+            self.exp_logger.log_metric("valid_metric", valid_metric, self.epoch)
 
             if valid_loss < best_valid:
                 tqdm.write(f"Epoch {self.epoch:0>5d}: train_loss: {train_loss:.5f}, valid_loss: {valid_loss:.5f}")
@@ -108,15 +108,17 @@ class RegressionTrainer():
 
 
     @torch.no_grad()
-    def evaluate(self):
-        valid_loss = []
-        for data in self.valid_dataset:
+    def evaluate(self, dataset):
+        losses = []
+        matrics = []
+        for data in dataset:
             data_dict = self.prepare_data(data)
             y_pred = self.model(torch.cat([data_dict.x_state, data_dict.x_feat], dim=-1))
             loss = self.criterion(data_dict.y, y_pred)
-            valid_loss.append(loss.item())
+            losses.append(loss.item())
+            matrics.append(loss.item())
 
-        return np.mean(valid_loss)
+        return np.mean(losses), np.mean(matrics)
 
     @torch.no_grad()
     def inference(self):
