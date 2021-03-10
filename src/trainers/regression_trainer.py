@@ -40,6 +40,9 @@ class RegressionTrainer():
         self.optimzer = config.optimizer(self.model.parameters())
         self.scheduler = config.scheduler(self.optimzer)
 
+        self.gt_mean = self.meta.gt_mean.to(self.device)
+        self.gt_std = self.meta.gt_std.to(self.device)
+
     @classmethod
     def config_trainer(cls, config: Config) -> Config:
         config.set_immutable(True)
@@ -60,7 +63,7 @@ class RegressionTrainer():
         data_dict = AttrDict()
         data_dict.x_state = data["state"].to(self.device)
         data_dict.x_feat = ((data["feat"] - self.meta.feat_mean) / self.meta.feat_std).to(self.device)
-        data_dict.y = data["gt"].to(self.device)
+        data_dict.y = (data["gt"].to(self.device) - self.gt_mean) / self.gt_std
         return data_dict
 
     def fit(self):
@@ -92,7 +95,14 @@ class RegressionTrainer():
             self.exp_logger.log_metric("valid_metric", valid_metric, self.epoch)
 
             if valid_loss < best_valid:
-                tqdm.write(f"Epoch {self.epoch:0>5d}: train_loss: {train_loss:.5f}, valid_loss: {valid_loss:.5f}")
+                tqdm.write(
+                    f"Epoch {self.epoch:0>5d}:" + \
+                    f"lr: {self.optimzer.param_groups[0]['lr']:.5f}, " + \
+                    f"train_loss: {train_loss:.5f}, " + \
+                    f"valid_loss: {valid_loss:.5f}, " + \
+                    f"train_metric: {train_metric:.5f}, " + \
+                    f"valid_metric: {valid_metric:.5f}"
+                )
                 best_valid = valid_loss
                 self.exp_logger.log_checkpoint(self.model.state_dict(), "best.pth")
                 early_stop_count = 0
@@ -116,7 +126,9 @@ class RegressionTrainer():
             y_pred = self.model(torch.cat([data_dict.x_state, data_dict.x_feat], dim=-1))
             loss = self.criterion(data_dict.y, y_pred)
             losses.append(loss.item())
-            matrics.append(loss.item())
+
+            metric = self.criterion(data_dict.y * self.gt_std + self.gt_mean, y_pred * self.gt_std + self.gt_mean)
+            matrics.append(metric.item())
 
         return np.mean(losses), np.mean(matrics)
 
@@ -130,7 +142,7 @@ class RegressionTrainer():
         for data in self.test_dataset:
             data_dict = self.prepare_data(data)
             y_pred = self.model(torch.cat([data_dict.x_state, data_dict.x_feat], dim=-1))
-            y_pred = y_pred.cpu()
+            y_pred = y_pred.cpu() * self.gt_std + self.gt_mean
 
             for pred in y_pred:
                 f.write(f"\n{count},{pred.item():.5f}")
