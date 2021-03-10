@@ -122,7 +122,7 @@ class RegressionTrainer():
     def inference(self):
         path = Path("results/pred.csv")
         f = path.open("w+")
-        f.write("id,tested_positive\n")
+        f.write("id,tested_positive")
 
         count = 0
         for data in self.test_dataset:
@@ -131,7 +131,7 @@ class RegressionTrainer():
             y_pred = y_pred.cpu()
 
             for pred in y_pred:
-                f.write(f"{count},{pred.item():.5f}\n")
+                f.write(f"\n{count},{pred.item():.5f}")
                 count += 1
 
         f.close()
