@@ -37,8 +37,8 @@ class RegressionTrainer():
         self.criterion = nn.MSELoss()
 
         self.model = MLP(**config.model)
-        self.optimzer = config.optimizer(self.model.parameters())
-        self.scheduler = config.scheduler(self.optimzer)
+        self.optimizer = config.optimizer(self.model.parameters())
+        self.scheduler = config.scheduler(self.optimizer)
 
         self.gt_mean = self.meta.gt_mean.to(self.device)
         self.gt_std = self.meta.gt_std.to(self.device)
@@ -77,11 +77,11 @@ class RegressionTrainer():
             for data in self.train_dataset:
                 data_dict = self.prepare_data(data)
 
-                self.optimzer.zero_grad()
+                self.optimizer.zero_grad()
                 y_pred = self.model(torch.cat([data_dict.x_state, data_dict.x_feat], dim=-1))
                 loss = self.criterion(data_dict.y, y_pred)
                 loss.backward()
-                self.optimzer.step()
+                self.optimizer.step()
 
             train_loss, train_metric = self.evaluate(self.train_dataset)
             valid_loss, valid_metric = self.evaluate(self.valid_dataset)
@@ -97,7 +97,7 @@ class RegressionTrainer():
             if valid_loss < best_valid:
                 tqdm.write(
                     f"Epoch {self.epoch:0>5d}:" + \
-                    f"lr: {self.optimzer.param_groups[0]['lr']:.5f}, " + \
+                    f"lr: {self.optimizer.param_groups[0]['lr']:.5f}, " + \
                     f"train_loss: {train_loss:.5f}, " + \
                     f"valid_loss: {valid_loss:.5f}, " + \
                     f"train_metric: {train_metric:.5f}, " + \
