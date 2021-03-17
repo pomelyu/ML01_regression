@@ -71,6 +71,7 @@ class RegressionTrainer():
         pbar.update(self.epoch)
 
         best_valid = np.finfo(float).max
+        best_metric = 0
         early_stop_count = 0
 
         for self.epoch in pbar:
@@ -104,12 +105,14 @@ class RegressionTrainer():
                     f"valid_metric: {valid_metric:.5f}"
                 )
                 best_valid = valid_loss
+                best_metric = valid_metric
                 self.exp_logger.log_checkpoint(self.model.state_dict(), "best.pth")
                 early_stop_count = 0
             else:
                 early_stop_count += 1
 
             self.exp_logger.log_metric("best_valid", best_valid, self.epoch)
+            self.exp_logger.log_metric("best_metric", best_metric, self.epoch)
 
             if early_stop_count >= self.cfg_trainer.early_stop:
                 break
