@@ -34,9 +34,9 @@ class RegressionTrainer():
         test_dataset = CSVDataset("test", self.cfg_dataset.test_dataset, self.cfg_dataset.select_column)
         self.test_dataset = DataLoader(test_dataset, batch_size=self.cfg_dataset.batch_size, shuffle=False)
 
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.MSELoss().to(self.device)
 
-        self.model = MLP(**config.model)
+        self.model = MLP(**config.model).to(self.device)
         self.optimizer = config.optimizer(self.model.parameters())
         self.scheduler = config.scheduler(self.optimizer)
 
