@@ -21,7 +21,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=str, help="configure file for training")
     parser.add_argument("-r", "--resume", type=str, default=None)
-    parser.add_argument("--debug", action="store_true", help="Run to debug, i.e. remove the randomness")
+    parser.add_argument("--seed", type=int, default=9527, help="Run with fix seed")
     parser.add_argument("--same_run", action="store_true", help="Continue the previous training and state, record in the same run")
     parser.add_argument('--resume_state', action="store_true", help="Load model with the training state")
     parser.add_argument("--local_rank", type=int, default=0, help="GPU id, which is automatically set while distributed data parallel(DDP) training")
@@ -33,7 +33,8 @@ def manual_seed(seed=0):
     np.random.seed(seed)
 
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(0)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -78,8 +79,8 @@ def main():
     else:
         exp_logger = None
 
-    if args.debug:
-        manual_seed()
+    if args.seed >= 0:
+        manual_seed(args.seed)
     else:
         torch.backends.cudnn.benchmark = True
 
