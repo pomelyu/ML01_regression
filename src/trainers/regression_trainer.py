@@ -109,6 +109,8 @@ class RegressionTrainer():
             else:
                 early_stop_count += 1
 
+            self.exp_logger.log_metric("best_valid", best_valid, self.epoch)
+
             if early_stop_count >= self.cfg_trainer.early_stop:
                 break
 
