@@ -48,6 +48,7 @@ class RegressionTrainer():
         config.set_immutable(True)
         config.setdefault("epochs", 500)
         config.setdefault("early_stop", 200)
+        config.setdefault("normalize_gt", False)
         config.set_immutable(False)
         return config
 
@@ -63,8 +64,18 @@ class RegressionTrainer():
         data_dict = AttrDict()
         data_dict.x_state = data["state"].to(self.device)
         data_dict.x_feat = ((data["feat"] - self.meta.feat_mean) / self.meta.feat_std).to(self.device)
-        data_dict.y = (data["gt"].to(self.device) - self.gt_mean) / self.gt_std
+        data_dict.y = data["gt"].to(self.device)
+
+        if self.cfg_trainer.normalize_gt:
+            data_dict.y = self.normalize_gt(data_dict.y)
+
         return data_dict
+
+    def normalize_gt(self, gt):
+        return (gt - self.gt_mean) / self.gt_std
+
+    def denormalize_gt(self, gt):
+        return gt * self.gt_std + self.gt_mean
 
     def fit(self):
         pbar = trange(self.cfg_trainer.epochs, ascii=True)
@@ -132,7 +143,10 @@ class RegressionTrainer():
             loss = self.criterion(data_dict.y, y_pred)
             losses.append(loss.item())
 
-            metric = self.criterion(data_dict.y * self.gt_std + self.gt_mean, y_pred * self.gt_std + self.gt_mean)
+            if self.cfg_trainer.normalize_gt:
+                metric = self.criterion(self.denormalize_gt(data_dict.y), self.denormalize_gt(y_pred))
+            else:
+                metric = loss.clone()
             matrics.append(metric.item())
 
         return np.mean(losses), np.mean(matrics)
@@ -147,7 +161,8 @@ class RegressionTrainer():
         for data in self.test_dataset:
             data_dict = self.prepare_data(data)
             y_pred = self.model(torch.cat([data_dict.x_state, data_dict.x_feat], dim=-1))
-            y_pred = y_pred.cpu() * self.gt_std + self.gt_mean
+            if self.cfg_trainer.normalize_gt:
+                y_pred = self.denormalize_gt(y_pred)
 
             for pred in y_pred:
                 f.write(f"\n{count},{pred.item():.5f}")
