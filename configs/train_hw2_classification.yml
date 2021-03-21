@@ -7,7 +7,12 @@ trainer:
   epochs: 20
   early_stop: 5
 
-model: {}
+model:
+  in_nc: 39
+  out_nc: 39
+  nd_qk: 64
+  nd_v: 128
+  nd_mlp: 256
 
 dataset:
   dataroot: data/timit_11

@@ -243,25 +243,48 @@ class TIMITDataset(Dataset):
 
 
 class Classifier(nn.Module):
-    def __init__(self):
+    def __init__(self, in_nc, out_nc, nd_qk=64, nd_v=128, nd_mlp=256):
         super().__init__()
-        self.layer1 = nn.Linear(429, 1024)
-        self.layer2 = nn.Linear(1024, 512)
-        self.layer3 = nn.Linear(512, 128)
-        self.out = nn.Linear(128, 39)
-
-        self.act_fn = nn.Sigmoid()
+        self.attention = AttentionBlock(in_nc, nd_v, nd_qk, bias=True)
+        self.mlp = nn.Sequential(
+            nn.Linear(nd_v, nd_mlp),
+            nn.BatchNorm1d(nd_mlp),
+            nn.ReLU(),
+            nn.Linear(nd_mlp, nd_mlp),
+            nn.BatchNorm1d(nd_mlp),
+            nn.ReLU(),
+            nn.Linear(nd_mlp, out_nc),
+        )
 
     def forward(self, x):
-        x = self.layer1(x)
-        x = self.act_fn(x)
-
-        x = self.layer2(x)
-        x = self.act_fn(x)
-
-        x = self.layer3(x)
-        x = self.act_fn(x)
-
-        x = self.out(x)
-
+        x = self.attention(x)
+        x = self.mlp(x)
         return x
+
+
+class AttentionBlock(nn.Module):
+    def __init__(self, in_nc, out_nc, nd, bias=False):
+        super().__init__()
+
+        self.in_nc = in_nc
+        self.Wq = nn.Linear(in_nc, nd, bias=bias)
+        self.Wk = nn.Linear(in_nc, nd, bias=bias)
+        self.Wv = nn.Linear(in_nc, out_nc, bias=bias)
+
+    def forward(self, x):
+        # x: (B, 11*39) -> (B, 11, 39) = (B, N, C)
+        B, N = x.shape
+        N = N // self.in_nc
+        x = x.view(B*N, self.in_nc)
+
+        Q: torch.Tensor = self.Wq(x).view(B, N, -1) # (B, N, nd)
+        K: torch.Tensor = self.Wk(x).view(B, N, -1) # (B, N, nd)
+        V: torch.Tensor = self.Wv(x).view(B, N, -1) # (B, N, out_nc)
+
+        A = Q @ K.transpose(1, 2) # (B, N, N)
+        A = torch.softmax(A, dim=-1)
+
+        out = A @ V # (B, N, out_nc)
+        out = out.sum(1)
+
+        return out
