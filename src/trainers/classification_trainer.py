@@ -91,6 +91,8 @@ class ClassificationTrainer():
         early_stop_count = 0
 
         for self.epoch in pbar:
+            self.model.train()
+
             train_loss = 0
             train_metric = 0
             train_num = 0
@@ -151,6 +153,8 @@ class ClassificationTrainer():
 
     @torch.no_grad()
     def evaluate(self, dataset):
+        self.model.eval()
+
         total_loss = 0
         total_metric = 0
         total_num = 0
@@ -174,6 +178,8 @@ class ClassificationTrainer():
 
     @torch.no_grad()
     def inference(self):
+        self.model.eval()
+
         path = Path("results/pred.csv")
         f = path.open("w+")
         f.write("Id,Class")
