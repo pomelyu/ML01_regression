@@ -123,20 +123,21 @@ class ClassificationTrainer():
             self.exp_logger.log_metric("valid_metric", valid_metric, self.epoch)
 
             if valid_metric < best_metric:
-                tqdm.write(
-                    f"Epoch {self.epoch:0>5d}:" + \
-                    f"lr: {self.optimizer.param_groups[0]['lr']:.5f}, " + \
-                    f"best_metric: {best_metric:.5f}" + \
-                    f"train_loss: {train_loss:.5f}, " + \
-                    f"valid_loss: {valid_loss:.5f}, " + \
-                    f"train_metric: {train_metric:.5f}, " + \
-                    f"valid_metric: {valid_metric:.5f}"
-                )
                 best_metric = valid_metric
                 self.exp_logger.log_checkpoint(self.model.state_dict(), "best.pth")
                 early_stop_count = 0
             else:
                 early_stop_count += 1
+
+            tqdm.write(
+                f"Epoch {self.epoch:0>5d}:" + \
+                f"lr: {self.optimizer.param_groups[0]['lr']:.5f}, " + \
+                f"best_metric: {best_metric:.5f}, " + \
+                f"train_loss: {train_loss:.5f}, " + \
+                f"valid_loss: {valid_loss:.5f}, " + \
+                f"train_metric: {train_metric:.5f}, " + \
+                f"valid_metric: {valid_metric:.5f}"
+            )
 
             self.exp_logger.log_metric("best_metric", best_metric, self.epoch)
 
