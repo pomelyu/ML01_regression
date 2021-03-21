@@ -1,0 +1,50 @@
+exp_name: HW1-regression
+run_name: RAdam
+record_folder: null
+
+trainer:
+  name: RegressionTrainer
+  epochs: 3000
+  early_stop: 300
+  normalize_gt: False
+
+model:
+  in_nc: 54
+  out_nc: 1
+  nd: 64
+  n_layers: 2
+
+dataset:
+  train_dataset: data/covid.train.csv
+  test_dataset: data/covid.test.csv
+  batch_size: 200
+  select_column:
+    - cli
+    - ili
+    - hh_cmnty_cli
+    - nohh_cmnty_cli
+    - tested_positive
+
+optimizer:
+  name: SGD
+  lr: 0.01
+  # betas: [0.9, 0.999]
+  # weight_decay: 0
+
+scheduler:
+  name: StepLR
+  step_size: 200
+  gamma: 1
+
+log_params:
+  dataset.batch_size: $dataset.batch_size
+
+  trainer.normalize_gt: $trainer.normalize_gt
+
+  model.nd: $model.nd
+  model.n_layers: $model.n_layers
+
+  optim: $optimizer.name
+  optim.lr: $optimizer.lr
+  
+  scheduler: $scheduler.name
