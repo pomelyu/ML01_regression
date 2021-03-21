@@ -87,7 +87,7 @@ class ClassificationTrainer():
         pbar = trange(self.cfg_trainer.epochs, ascii=True)
         pbar.update(self.epoch)
 
-        best_metric = np.finfo(float).max
+        best_metric = 0
         early_stop_count = 0
 
         for self.epoch in pbar:
@@ -123,7 +123,7 @@ class ClassificationTrainer():
             self.exp_logger.log_metric("train_metric", train_metric, self.epoch)
             self.exp_logger.log_metric("valid_metric", valid_metric, self.epoch)
 
-            if valid_metric < best_metric:
+            if valid_metric > best_metric:
                 best_metric = valid_metric
                 self.exp_logger.log_checkpoint(self.model.state_dict(), "best.pth")
                 early_stop_count = 0
