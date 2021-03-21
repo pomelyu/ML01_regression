@@ -257,9 +257,10 @@ class Classifier(nn.Module):
         assert n_mlp_layers >= 1
 
         operations = []
-        for _ in range(n_mlp_layers):
+        for i in range(n_mlp_layers):
+            nd = nd_v * n_frames if i == 0 else nd_mlp
             operations += [
-                nn.Linear(nd_v * n_frames, nd_mlp),
+                nn.Linear(nd, nd_mlp),
                 nn.BatchNorm1d(nd_mlp),
                 nn.ReLU(),
             ]
