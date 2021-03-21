@@ -1,5 +1,5 @@
 exp_name: HW2-classification
-run_name: Baseline-Adam
+run_name: Attention-Adam
 record_folder: null
 
 trainer:
@@ -11,8 +11,10 @@ model:
   in_nc: 39
   out_nc: 39
   nd_qk: 64
-  nd_v: 128
+  nd_v: 64
+  n_frames: 11
   nd_mlp: 256
+  n_mlp_layers: 1
 
 dataset:
   dataroot: data/timit_11

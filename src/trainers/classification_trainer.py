@@ -249,22 +249,28 @@ class TIMITDataset(Dataset):
 
 
 class Classifier(nn.Module):
-    def __init__(self, in_nc, out_nc, nd_qk=64, nd_v=128, nd_mlp=256):
+    def __init__(self, in_nc, out_nc, nd_qk=64, nd_v=64, n_frames=11, nd_mlp=128, n_mlp_layers=1):
         super().__init__()
-        self.attention = AttentionBlock(in_nc, nd_v, nd_qk, bias=True)
-        self.mlp = nn.Sequential(
-            nn.Linear(nd_v, nd_mlp),
-            nn.BatchNorm1d(nd_mlp),
-            nn.ReLU(),
-            nn.Linear(nd_mlp, nd_mlp),
-            nn.BatchNorm1d(nd_mlp),
-            nn.ReLU(),
-            nn.Linear(nd_mlp, out_nc),
-        )
+        self.attention1 = AttentionBlock(in_nc, nd_v, nd_qk, bias=True)
+        self.attention2 = AttentionBlock(nd_v, nd_v, nd_qk, bias=True)
+
+        assert n_mlp_layers >= 1
+
+        operations = []
+        for _ in range(n_mlp_layers):
+            operations += [
+                nn.Linear(nd_v * n_frames, nd_mlp),
+                nn.BatchNorm1d(nd_mlp),
+                nn.ReLU(),
+            ]
+        self.mlp = nn.Sequential(*operations)
+        self.out = nn.Linear(nd_mlp, out_nc)
 
     def forward(self, x):
-        x = self.attention(x)
+        x = self.attention1(x)
+        x = self.attention2(x)
         x = self.mlp(x)
+        x = self.out(x)
         return x
 
 
@@ -291,6 +297,6 @@ class AttentionBlock(nn.Module):
         A = torch.softmax(A, dim=-1)
 
         out = A @ V # (B, N, out_nc)
-        out = out.sum(1)
+        out = out.view(B, -1)
 
         return out
