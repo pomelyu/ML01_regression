@@ -1,0 +1,32 @@
+exp_name: HW2-classification
+run_name: Baseline-Adam
+record_folder: null
+
+trainer:
+  name: ClassificationTrainer
+  epochs: 20
+  early_stop: 5
+
+model: {}
+
+dataset:
+  dataroot: data/timit_11
+  valid_ratio: 0.2
+  batch_size: 64
+
+optimizer:
+  name: Adam
+  lr: 0.0001
+
+scheduler:
+  name: StepLR
+  step_size: 200
+  gamma: 1
+
+log_params:
+  dataset.batch_size: $dataset.batch_size
+
+  optim: $optimizer.name
+  optim.lr: $optimizer.lr
+  
+  scheduler: $scheduler.name
