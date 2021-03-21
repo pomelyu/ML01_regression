@@ -6,6 +6,7 @@ from datetime import datetime
 import mlconfig
 import numpy as np
 import torch
+from loguru import logger
 
 import src.criterions   # pylint: disable=unused-import, wrong-import-position
 import src.datasets     # pylint: disable=unused-import, wrong-import-position
@@ -84,8 +85,8 @@ def main():
     else:
         torch.backends.cudnn.benchmark = True
 
-    print(f'cuda:{args.local_rank}')
     device = torch.device(f"cuda:{args.local_rank}" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Start training on device: {device}")
 
     git_commit, git_tag = get_repo_info()
     meta = {
