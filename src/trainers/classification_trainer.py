@@ -3,6 +3,7 @@ from pathlib import Path
 import mlconfig
 import numpy as np
 import torch
+from loguru import logger
 from mlconfig.collections import AttrDict
 from mlconfig.config import Config
 from torch import nn
@@ -228,6 +229,8 @@ class TIMITDataset(Dataset):
 
         self.data = data
         self.label = label
+
+        logger.info(f"[{split}] Load: # {len(data)} data")
 
     def __getitem__(self, index):
         return {
