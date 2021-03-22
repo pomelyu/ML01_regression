@@ -248,30 +248,53 @@ class TIMITDataset(Dataset):
         return len(self.data)
 
 
-class Classifier(nn.Module):
-    def __init__(self, in_nc, out_nc, nd_qk=64, nd_v=64, n_frames=11, nd_mlp=128, n_mlp_layers=1):
+class Classifier(nn.Sequential):
+    def __init__(self, in_nc, out_nc, nd_qk=64, nd_v=64, n_frames=11, n_attentions=2, nd_mlp=128, n_res_linears=1):
         super().__init__()
-        self.attention1 = AttentionBlock(in_nc, nd_v, nd_qk, bias=True)
-        self.attention2 = AttentionBlock(nd_v, nd_v, nd_qk, bias=True)
 
-        assert n_mlp_layers >= 1
+        assert n_attentions >= 1
 
-        operations = []
-        for i in range(n_mlp_layers):
+        self.add_module("attention1", AttentionBlock(in_nc, nd_v, nd_qk, bias=True))
+
+        for i in range(1, n_attentions-1):
+            self.add_module(f"attetion{i+1}", AttentionBlock(nd_v, nd_v, nd_qk, bias=True))
+
+        assert n_res_linears >= 1
+
+        for i in range(n_res_linears):
             nd = nd_v * n_frames if i == 0 else nd_mlp
-            operations += [
-                nn.Linear(nd, nd_mlp),
-                nn.BatchNorm1d(nd_mlp),
-                nn.ReLU(),
-            ]
-        self.mlp = nn.Sequential(*operations)
-        self.out = nn.Linear(nd_mlp, out_nc)
+            self.add_module(f"res{i+1}", ResLinear(nd, nd_mlp))
+
+        self.add_module("out", nn.Linear(nd_mlp, out_nc))
+
+
+class ResLinear(nn.Module):
+    def __init__(self, in_nc, out_nc, **kwargs):
+        super().__init__()
+
+        self.fc1 = nn.Linear(in_nc, out_nc, **kwargs)
+        self.norm1 = nn.BatchNorm1d(out_nc)
+        self.actv1 = nn.ReLU()
+
+        self.fc2 = nn.Linear(out_nc, out_nc, **kwargs)
+        self.norm2 = nn.BatchNorm1d(out_nc)
+        self.actv2 = nn.ReLU()
+
+        if in_nc != out_nc:
+            self.fc_shortcut = nn.Linear(in_nc, out_nc, **kwargs)
+        else:
+            self.fc_shortcut = None
 
     def forward(self, x):
-        x = self.attention1(x)
-        x = self.attention2(x)
-        x = self.mlp(x)
-        x = self.out(x)
+        shortcut = x
+        x = self.actv1(self.norm1(self.fc1(x)))
+        x = self.norm2(self.fc2(x))
+
+        if self.fc_shortcut is not None:
+            shortcut = self.fc_shortcut(shortcut)
+
+        x = self.actv2(x + shortcut)
+
         return x
 
 
