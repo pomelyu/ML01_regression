@@ -84,7 +84,7 @@ class ClassificationTrainer():
         return data_dict
 
     def fit(self):
-        pbar = trange(self.cfg_trainer.epochs, ascii=True)
+        pbar = trange(1, self.cfg_trainer.epochs+1, ascii=True)
         pbar.update(self.epoch)
 
         best_metric = 0
