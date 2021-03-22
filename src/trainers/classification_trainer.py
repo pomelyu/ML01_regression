@@ -112,12 +112,12 @@ class ClassificationTrainer():
                 train_metric += self.calculate_metric(data_dict.y, y_logit) * B
                 train_num += B
 
+                self.scheduler.step()
+
             train_loss /= train_num
             train_metric /= train_num
 
             valid_loss, valid_metric = self.evaluate(self.valid_dataset)
-
-            self.scheduler.step()
 
             self.exp_logger.log_metric("train_loss", train_loss, self.epoch)
             self.exp_logger.log_metric("valid_loss", valid_loss, self.epoch)
