@@ -61,7 +61,7 @@ class ClassificationTrainer():
     def config_trainer(cls, config: Config) -> Config:
         config.set_immutable(True)
         config.setdefault("epochs", 500)
-        config.setdefault("early_stop", 200)
+        config.setdefault("early_stop", np.iinfo(np.int).max)
         config.set_immutable(False)
         return config
 
