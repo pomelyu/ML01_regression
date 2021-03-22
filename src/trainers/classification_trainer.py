@@ -53,7 +53,7 @@ class ClassificationTrainer():
         )
 
         self.criterion = nn.CrossEntropyLoss()
-        self.model = Classifier(**config.model).to(self.device)
+        self.model = config.model().to(self.device)
         self.optimizer = config.optimizer(self.model.parameters())
         self.scheduler = config.scheduler(self.optimizer)
 
@@ -248,7 +248,34 @@ class TIMITDataset(Dataset):
         return len(self.data)
 
 
-class Classifier(nn.Sequential):
+@mlconfig.register()
+class Classifier(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = nn.Linear(429, 1024)
+        self.layer2 = nn.Linear(1024, 512)
+        self.layer3 = nn.Linear(512, 128)
+        self.out = nn.Linear(128, 39)
+
+        self.act_fn = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.act_fn(x)
+
+        x = self.layer2(x)
+        x = self.act_fn(x)
+
+        x = self.layer3(x)
+        x = self.act_fn(x)
+
+        x = self.out(x)
+
+        return x
+
+
+@mlconfig.register()
+class AttentionClassifier(nn.Sequential):
     def __init__(self, in_nc, out_nc, nd_qk=64, nd_v=64, n_frames=11, n_attentions=2, nd_mlp=128, n_res_linears=1):
         super().__init__()
 
