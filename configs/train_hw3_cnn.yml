@@ -1,0 +1,38 @@
+exp_name: HW3-CNN
+run_name: base
+record_folder: null
+
+trainer:
+  name: HW3Trainer
+  epochs: 80
+  epochs_eval: 1
+
+model:
+  name: HW3BasicClassifier
+
+dataset:
+  train_dataset: data/food-11/training/labeled
+  unlabeled_dataset: data/food-11/training/unlabeled
+  valid_dataset: data/food-11/validation
+  test_dataset: data/food-11/testing
+  batch_size: 8
+
+optimizer:
+  name: Adam
+  lr: 0.0003
+  weight_decay: 1.e-5
+
+scheduler:
+  name: StepLR
+  step_size: 200
+  gamma: 1
+
+log_params:
+  dataset.batch_size: $dataset.batch_size
+
+  model.name: $model.name
+
+  optim: $optimizer.name
+  optim.lr: $optimizer.lr
+  
+  scheduler: $scheduler.name
