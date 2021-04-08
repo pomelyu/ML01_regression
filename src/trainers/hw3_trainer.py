@@ -28,10 +28,11 @@ class HW3Trainer():
         self.cfg_dataset = self.config_dataset(config.dataset)
 
         batch_size = self.cfg_dataset.batch_size
+        num_workers = self.cfg_dataset.num_workers
         self.train_dataset = create_dataset(self.cfg_dataset.train_dataset)
         self.unlabel_dataset = create_dataset(self.cfg_dataset.unlabeled_dataset)
-        self.valid_dataloader = create_dataloader(create_dataset(self.cfg_dataset.valid_dataset), batch_size)
-        self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size)
+        self.valid_dataloader = create_dataloader(create_dataset(self.cfg_dataset.valid_dataset), batch_size, num_workers)
+        self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size, num_workers)
 
         self.criterion = nn.CrossEntropyLoss()
 
@@ -52,6 +53,7 @@ class HW3Trainer():
     def config_dataset(cls, config: Config) -> Config:
         config.set_immutable(True)
         config.setdefault("batch_size", 128)
+        config.setdefault("num_worker", 0)
         config.set_immutable(False)
         return config
 
@@ -76,7 +78,7 @@ class HW3Trainer():
         early_stop_count = 0
 
         for self.epoch in pbar:
-            train_dataloader = create_dataloader(self.train_dataset, batch_size=self.cfg_dataset.batch_size)
+            train_dataloader = create_dataloader(self.train_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers)
 
             for data in tqdm(train_dataloader, total=len(train_dataloader), ascii=True, desc="train"):
                 data_dict = self.prepare_data(data)
@@ -165,8 +167,8 @@ def create_dataset(dataroot):
     return DatasetFolderWithIndex(dataroot, loader=lambda x: Image.open(x), extensions="jpg", transform=transform)
 
 
-def create_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
+def create_dataloader(dataset, batch_size, num_workers):
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=num_workers)
 
 
 def calculate_accuracy(pred, label_target):
