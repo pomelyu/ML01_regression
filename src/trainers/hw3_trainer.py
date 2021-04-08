@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import mlconfig
 import numpy as np
 import torch
@@ -115,6 +117,9 @@ class HW3Trainer():
             if early_stop_count >= self.cfg_trainer.early_stop:
                 break
 
+        self.model.load_state_dict(torch.load(self.exp_logger.tmp_dir / "best.pth"))
+        result_file = self.inference()
+        self.exp_logger.log_artifact(result_file)
 
     @torch.no_grad()
     def evaluate(self, dataloader):
@@ -131,6 +136,24 @@ class HW3Trainer():
 
         return np.mean(losses), np.mean(matrics)
 
+
+    @torch.no_grad()
+    def inference(self):
+        path = Path("results/pred.csv")
+        f = path.open("w+")
+        f.write("Id,Category")
+
+        count = 0
+        for data in tqdm(self.test_dataloader, total=len(self.test_dataloader), ascii=True, desc="inference"):
+            data_dict = self.prepare_data(data)
+            data_dict = self.forward(data_dict)
+
+            for pred in torch.argmax(data_dict.y_pred, dim=-1):
+                f.write(f"\n{count},{pred.item():d}")
+                count += 1
+
+        f.close()
+        return path
 
 def create_dataset(dataroot):
     transform = transforms.Compose([
