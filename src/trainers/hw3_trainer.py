@@ -80,7 +80,9 @@ class HW3Trainer():
         for self.epoch in pbar:
             train_dataloader = create_dataloader(self.train_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers)
 
-            for data in tqdm(train_dataloader, total=len(train_dataloader), ascii=True, desc="train"):
+            running_loss = None
+            tbar = tqdm(train_dataloader, total=len(train_dataloader), ascii=True)
+            for data in tbar:
                 data_dict = self.prepare_data(data)
 
                 self.optimizer.zero_grad()
@@ -89,13 +91,27 @@ class HW3Trainer():
                 loss.backward()
                 self.optimizer.step()
 
+                if running_loss is None:
+                    running_loss = loss.item()
+                else:
+                    running_loss = running_loss * 0.9 + loss.item() * 0.1
+                tbar.set_description(f"[{self.epoch:0>4d}] loss: {running_loss:.4f}")
+                tbar.refresh()
+
             self.scheduler.step()
+            self.exp_logger.log_metric("running_loss", running_loss, self.epoch)
 
             if self.epoch % self.cfg_trainer.epochs_eval != 0:
                 continue
 
-            train_loss, train_metric = self.evaluate(train_dataloader)
-            valid_loss, valid_metric = self.evaluate(self.valid_dataloader)
+            train_loss, train_metric = self.evaluate(train_dataloader, "train_dataset")
+            valid_loss, valid_metric = self.evaluate(self.valid_dataloader, "valid_dataset")
+
+            self.exp_logger.log_metric("train_loss", train_loss, self.epoch)
+            self.exp_logger.log_metric("valid_loss", valid_loss, self.epoch)
+
+            self.exp_logger.log_metric("train_metric", train_metric, self.epoch)
+            self.exp_logger.log_metric("valid_metric", valid_metric, self.epoch)
 
             if valid_loss < best_valid:
                 tqdm.write(
@@ -124,10 +140,10 @@ class HW3Trainer():
         self.exp_logger.log_artifact(result_file)
 
     @torch.no_grad()
-    def evaluate(self, dataloader):
+    def evaluate(self, dataloader, name):
         losses = []
         matrics = []
-        for data in tqdm(dataloader, total=len(dataloader), ascii=True, desc="evaluate"):
+        for data in tqdm(dataloader, total=len(dataloader), ascii=True, desc=f"evaluate {name}"):
             data_dict = self.prepare_data(data)
             data_dict = self.forward(data_dict)
             loss = self.criterion(data_dict.y_pred, data_dict.y)
