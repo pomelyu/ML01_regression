@@ -42,19 +42,19 @@ class HW3Trainer():
 
     @classmethod
     def config_trainer(cls, config: Config) -> Config:
-        config.set_immutable(True)
+        config.set_immutable(False)
         config.setdefault("epochs", 500)
         config.setdefault("epochs_eval", 10)
         config.setdefault("early_stop", np.iinfo(int).max)
-        config.set_immutable(False)
+        config.set_immutable(True)
         return config
 
     @classmethod
     def config_dataset(cls, config: Config) -> Config:
-        config.set_immutable(True)
+        config.set_immutable(False)
         config.setdefault("batch_size", 128)
         config.setdefault("num_worker", 0)
-        config.set_immutable(False)
+        config.set_immutable(True)
         return config
 
     def prepare_data(self, data: dict) -> dict:
