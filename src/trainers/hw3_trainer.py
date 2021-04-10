@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import kornia as K
 import mlconfig
 import numpy as np
 import torch
@@ -26,6 +27,7 @@ class HW3Trainer():
 
         self.cfg_trainer = self.config_trainer(config.trainer)
         self.cfg_dataset = self.config_dataset(config.dataset)
+        self.cfg_augmentator = self.config_augmentator(config.augmentator)
 
         batch_size = self.cfg_dataset.batch_size
         num_workers = self.cfg_dataset.num_workers
@@ -33,6 +35,23 @@ class HW3Trainer():
         self.unlabel_dataset = create_dataset(self.cfg_dataset.unlabeled_dataset)
         self.valid_dataloader = create_dataloader(create_dataset(self.cfg_dataset.valid_dataset), batch_size, num_workers)
         self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size, num_workers, shuffle=False)
+
+        self.normalized = nn.Sequential(
+            K.augmentation.Normalize(mean=0., std=255.),
+            K.augmentation.Normalize(mean=torch.FloatTensor([0.485, 0.456, 0.406]), std=torch.FloatTensor([0.229, 0.224, 0.225])),
+        ).to(self.device)
+
+        self.denormalized = nn.Sequential(
+            K.augmentation.Denormalize(mean=torch.FloatTensor([0.485, 0.456, 0.406]), std=torch.FloatTensor([0.229, 0.224, 0.225])),
+            K.augmentation.Denormalize(mean=0., std=255.),
+        ).to(self.device)
+
+        self.augmentator = nn.Sequential(
+            K.augmentation.RandomHorizontalFlip(p=0.5),
+            K.augmentation.RandomAffine(**self.cfg_augmentator.random_affine),
+            K.augmentation.ColorJitter(**self.cfg_augmentator.color_jitter),
+            K.augmentation.GaussianBlur(**self.cfg_augmentator.gaussian_blur),
+        ).to(self.device)
 
         self.criterion = nn.CrossEntropyLoss()
 
@@ -57,11 +76,45 @@ class HW3Trainer():
         config.set_immutable(True)
         return config
 
-    def prepare_data(self, data: dict) -> dict:
+    @classmethod
+    def config_augmentator(cls, config: Config) -> Config:
+        config.set_immutable(False)
+
+        random_affine: AttrDict = config.get("rando_affine", AttrDict({}))
+        random_affine.setdefault("p", 0.7)
+        random_affine.setdefault("degrees", 10)
+        random_affine.setdefault("translate", (0.05, 0.05))
+        random_affine.setdefault("scale", (0.9, 1.1))
+        random_affine.setdefault("shear", 5)
+        config.random_affine = random_affine
+
+        color_jitter: AttrDict = config.get("color_jitter", AttrDict({}))
+        color_jitter.setdefault("p", 1.0)
+        color_jitter.setdefault("brightness", 0)
+        color_jitter.setdefault("contrast", 0)
+        color_jitter.setdefault("saturation", 0)
+        color_jitter.setdefault("hue", 0)
+        config.color_jitter = color_jitter
+
+        gaussian_blur: AttrDict = config.get("gaussian_blur", AttrDict({}))
+        gaussian_blur.setdefault("p", 1.0)
+        gaussian_blur.setdefault("kernel_size", (5, 5))
+        gaussian_blur.setdefault("sigma", (3, 3))
+        config.gaussian_blur = gaussian_blur
+
+        config.set_immutable(True)
+        return config
+
+    def prepare_data(self, data: dict, augment: bool =False) -> dict:
         data_dict = AttrDict()
         data_dict.x = data["image"].to(self.device)
         data_dict.y = data["label"].to(self.device)
         data_dict.index = data["index"]
+
+        data_dict.x = self.normalized(data_dict.x)
+        if augment:
+            data_dict.x = self.augmentator(data_dict.x)
+
         return data_dict
 
     def forward(self, data_dict):
@@ -83,7 +136,7 @@ class HW3Trainer():
             running_loss = None
             tbar = tqdm(train_dataloader, total=len(train_dataloader), ascii=True)
             for data in tbar:
-                data_dict = self.prepare_data(data)
+                data_dict = self.prepare_data(data, augment=True)
 
                 self.optimizer.zero_grad()
                 data_dict = self.forward(data_dict)
@@ -177,8 +230,6 @@ def create_dataset(dataroot):
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=0, std=255),
-        transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
     return DatasetFolderWithIndex(dataroot, loader=lambda x: Image.open(x), extensions="jpg", transform=transform)
 
