@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import cv2
 import kornia as K
 import mlconfig
 import numpy as np
@@ -37,13 +38,11 @@ class HW3Trainer():
         self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size, num_workers, shuffle=False)
 
         self.normalized = nn.Sequential(
-            K.augmentation.Normalize(mean=0., std=255.),
             K.augmentation.Normalize(mean=torch.FloatTensor([0.485, 0.456, 0.406]), std=torch.FloatTensor([0.229, 0.224, 0.225])),
         ).to(self.device)
 
         self.denormalized = nn.Sequential(
             K.augmentation.Denormalize(mean=torch.FloatTensor([0.485, 0.456, 0.406]), std=torch.FloatTensor([0.229, 0.224, 0.225])),
-            K.augmentation.Denormalize(mean=0., std=255.),
         ).to(self.device)
 
         self.augmentator = nn.Sequential(
@@ -157,14 +156,17 @@ class HW3Trainer():
             if self.epoch % self.cfg_trainer.epochs_eval != 0:
                 continue
 
-            train_loss, train_metric = self.evaluate(train_dataloader, "train_dataset")
-            valid_loss, valid_metric = self.evaluate(self.valid_dataloader, "valid_dataset")
+            train_loss, train_metric, train_sample = self.evaluate(train_dataloader, "train_dataset")
+            valid_loss, valid_metric, valid_sample = self.evaluate(self.valid_dataloader, "valid_dataset")
 
             self.exp_logger.log_metric("train_loss", train_loss, self.epoch)
             self.exp_logger.log_metric("valid_loss", valid_loss, self.epoch)
 
             self.exp_logger.log_metric("train_metric", train_metric, self.epoch)
             self.exp_logger.log_metric("valid_metric", valid_metric, self.epoch)
+
+            self.exp_logger.log_image(self.epoch, train_sample, "train_sample", "jpg")
+            self.exp_logger.log_image(self.epoch, valid_sample, "valid_sample", "jpg")
 
             if valid_loss < best_valid:
                 tqdm.write(
@@ -193,6 +195,23 @@ class HW3Trainer():
         self.exp_logger.log_artifact(result_file)
 
     @torch.no_grad()
+    def show_prediction(self, data_dict, num_data=16):
+        num_data = min(num_data, len(data_dict.x))
+        x = self.denormalized(data_dict.x)
+        x = K.resize(x, (128, 128)) * 255
+        x = torch.clamp(x, 0, 255)
+        x: np.ndarray = K.tensor_to_image(x).astype(np.uint8)
+        y_label = torch.argmax(data_dict.y_pred, dim=-1).detach().cpu().numpy()
+        # for img, label in zip(x, y_label):
+        #     cv2.putText(img, f"{label:d}", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+
+        x = x.reshape((4, -1, *x.shape[1:]))
+        x = np.concatenate(x, axis=-2)
+        x = np.concatenate(x, axis=-3)
+
+        return x
+
+    @torch.no_grad()
     def evaluate(self, dataloader, name):
         losses = []
         matrics = []
@@ -205,7 +224,9 @@ class HW3Trainer():
             metric = calculate_accuracy(data_dict.y_pred, data_dict.y)
             matrics.append(metric.item())
 
-        return np.mean(losses), np.mean(matrics)
+        sample = self.show_prediction(data_dict)
+
+        return np.mean(losses), np.mean(matrics), sample
 
 
     @torch.no_grad()
