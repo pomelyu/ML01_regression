@@ -160,8 +160,10 @@ class HW3Trainer():
 
             self.scheduler.step()
 
-            self.exp_logger.log_metric("train_loss", train_loss / num_data, self.epoch)
-            self.exp_logger.log_metric("train_metric", train_metric / num_data, self.epoch)
+            train_loss /= num_data
+            train_metric /= num_data
+            self.exp_logger.log_metric("train_loss", train_loss, self.epoch)
+            self.exp_logger.log_metric("train_metric", train_metric, self.epoch)
             self.exp_logger.log_image(self.epoch, train_sample, "train_sample", "jpg")
 
             if self.epoch % self.cfg_trainer.epochs_eval != 0:
