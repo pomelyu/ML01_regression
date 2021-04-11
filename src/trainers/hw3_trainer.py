@@ -132,7 +132,10 @@ class HW3Trainer():
         for self.epoch in pbar:
             train_dataloader = create_dataloader(self.train_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers)
 
-            running_loss = None
+            train_loss = 0
+            train_metric = 0
+            train_sample = None
+            num_data = 0
             tbar = tqdm(train_dataloader, total=len(train_dataloader), ascii=True)
             for data in tbar:
                 data_dict = self.prepare_data(data, augment=True)
@@ -143,29 +146,31 @@ class HW3Trainer():
                 loss.backward()
                 self.optimizer.step()
 
-                if running_loss is None:
-                    running_loss = loss.item()
-                else:
-                    running_loss = running_loss * 0.9 + loss.item() * 0.1
-                tbar.set_description(f"[{self.epoch:0>4d}] loss: {running_loss:.4f}")
-                tbar.refresh()
+                with torch.no_grad():
+                    if train_sample is None:
+                        train_sample = self.show_prediction(data_dict)
+
+                    batch = len(data_dict.x)
+                    train_loss+= loss.item() * batch
+                    train_metric += calculate_accuracy(data_dict.y_pred, data_dict.y).item() * batch
+                    num_data += batch
+
+                    tbar.set_description(f"[{self.epoch:0>4d}] loss: {train_loss / num_data:.4f}")
+                    tbar.refresh()
 
             self.scheduler.step()
-            self.exp_logger.log_metric("running_loss", running_loss, self.epoch)
+
+            self.exp_logger.log_metric("train_loss", train_loss / num_data, self.epoch)
+            self.exp_logger.log_metric("train_metric", train_metric / num_data, self.epoch)
+            self.exp_logger.log_image(self.epoch, train_sample, "train_sample", "jpg")
 
             if self.epoch % self.cfg_trainer.epochs_eval != 0:
                 continue
 
-            train_loss, train_metric, train_sample = self.evaluate(train_dataloader, "train_dataset")
             valid_loss, valid_metric, valid_sample = self.evaluate(self.valid_dataloader, "valid_dataset")
 
-            self.exp_logger.log_metric("train_loss", train_loss, self.epoch)
             self.exp_logger.log_metric("valid_loss", valid_loss, self.epoch)
-
-            self.exp_logger.log_metric("train_metric", train_metric, self.epoch)
             self.exp_logger.log_metric("valid_metric", valid_metric, self.epoch)
-
-            self.exp_logger.log_image(self.epoch, train_sample, "train_sample", "jpg")
             self.exp_logger.log_image(self.epoch, valid_sample, "valid_sample", "jpg")
 
             if valid_loss < best_valid:
@@ -182,7 +187,7 @@ class HW3Trainer():
                 self.exp_logger.log_checkpoint(self.model.state_dict(), "best.pth")
                 early_stop_count = 0
             else:
-                early_stop_count += 1
+                early_stop_count += self.cfg_trainer.epochs_eval
 
             self.exp_logger.log_metric("best_valid", best_valid, self.epoch)
             self.exp_logger.log_metric("best_metric", best_metric, self.epoch)
