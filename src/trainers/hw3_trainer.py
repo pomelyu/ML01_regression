@@ -197,13 +197,16 @@ class HW3Trainer():
     @torch.no_grad()
     def show_prediction(self, data_dict, num_data=16):
         num_data = min(num_data, len(data_dict.x))
-        x = self.denormalized(data_dict.x)
+        x = self.denormalized(data_dict.x[:num_data])
         x = K.resize(x, (128, 128)) * 255
         x = torch.clamp(x, 0, 255)
         x: np.ndarray = K.tensor_to_image(x).astype(np.uint8)
-        y_label = torch.argmax(data_dict.y_pred, dim=-1).detach().cpu().numpy()
-        # for img, label in zip(x, y_label):
-        #     cv2.putText(img, f"{label:d}", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        x = np.ascontiguousarray(x)
+        y_pred = torch.argmax(data_dict.y_pred[:num_data], dim=-1).detach().cpu().numpy()
+        y = data_dict.y[:num_data].cpu().numpy()
+
+        for img, pred, gt in zip(x, y_pred, y):
+            cv2.putText(img, f"{gt:d}: {pred:d}", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
 
         x = x.reshape((4, -1, *x.shape[1:]))
         x = np.concatenate(x, axis=-2)
@@ -215,6 +218,7 @@ class HW3Trainer():
     def evaluate(self, dataloader, name):
         losses = []
         matrics = []
+        sample = None
         for data in tqdm(dataloader, total=len(dataloader), ascii=True, desc=f"evaluate {name}"):
             data_dict = self.prepare_data(data)
             data_dict = self.forward(data_dict)
@@ -224,7 +228,8 @@ class HW3Trainer():
             metric = calculate_accuracy(data_dict.y_pred, data_dict.y)
             matrics.append(metric.item())
 
-        sample = self.show_prediction(data_dict)
+            if sample is None:
+                sample = self.show_prediction(data_dict)
 
         return np.mean(losses), np.mean(matrics), sample
 
