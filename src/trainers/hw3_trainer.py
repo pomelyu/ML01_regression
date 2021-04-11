@@ -34,7 +34,7 @@ class HW3Trainer():
         num_workers = self.cfg_dataset.num_workers
         self.train_dataset = create_dataset(self.cfg_dataset.train_dataset)
         self.unlabel_dataset = create_dataset(self.cfg_dataset.unlabeled_dataset)
-        self.valid_dataloader = create_dataloader(create_dataset(self.cfg_dataset.valid_dataset), batch_size, num_workers)
+        self.valid_dataloader = create_dataloader(create_dataset(self.cfg_dataset.valid_dataset), batch_size, num_workers, shuffle=False)
         self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size, num_workers, shuffle=False)
 
         self.normalized = nn.Sequential(
