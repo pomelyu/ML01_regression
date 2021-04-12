@@ -213,7 +213,7 @@ class HW3Trainer():
         y = data_dict.y[:num_data].cpu().numpy()
 
         for img, pred, gt in zip(x, y_pred, y):
-            cv2.putText(img, f"{gt:d}: {pred:d}", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+            draw_text(img, f"{gt:d}:{pred:d}", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
 
         x = x.reshape((4, -1, *x.shape[1:]))
         x = np.concatenate(x, axis=-2)
@@ -357,3 +357,18 @@ class HW3BasicClassifier(nn.Module):
         # The features are transformed by fully-connected layers to obtain the final logits.
         x = self.fc_layers(x)
         return x
+
+
+def draw_text(image, text,
+        pos=(0, 0),
+        font=cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale=1,
+        font_thickness=2,
+        text_color=(255, 255, 255),
+        text_color_bg=(0, 0, 0, 0)
+    ):
+    x, y = pos
+    text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
+    text_w, text_h = text_size
+    cv2.rectangle(image, (x, y - text_h), (x + text_w, y), text_color_bg, -1)
+    cv2.putText(image, text, pos, font, font_scale, text_color, font_thickness, bottomLeftOrigin=False)
