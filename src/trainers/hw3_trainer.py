@@ -79,7 +79,7 @@ class HW3Trainer():
     def config_augmentator(cls, config: Config) -> Config:
         config.set_immutable(False)
 
-        random_affine: AttrDict = config.get("rando_affine", AttrDict({}))
+        random_affine: AttrDict = config.get("random_affine", AttrDict({}))
         random_affine.setdefault("p", 0.7)
         random_affine.setdefault("degrees", 10)
         random_affine.setdefault("translate", (0.05, 0.05))
@@ -104,7 +104,7 @@ class HW3Trainer():
         config.set_immutable(True)
         return config
 
-    def prepare_data(self, data: dict, augment: bool =False) -> dict:
+    def prepare_data(self, data: dict, augment: bool = False) -> dict:
         data_dict = AttrDict()
         data_dict.x = data["image"].to(self.device)
         data_dict.y = data["label"].to(self.device)
