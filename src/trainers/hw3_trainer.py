@@ -38,11 +38,11 @@ class HW3Trainer():
         self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size, num_workers, shuffle=False)
 
         self.normalized = nn.Sequential(
-            K.augmentation.Normalize(mean=torch.FloatTensor([0.485, 0.456, 0.406]), std=torch.FloatTensor([0.229, 0.224, 0.225])),
+            nn.Identity(),
         ).to(self.device)
 
         self.denormalized = nn.Sequential(
-            K.augmentation.Denormalize(mean=torch.FloatTensor([0.485, 0.456, 0.406]), std=torch.FloatTensor([0.229, 0.224, 0.225])),
+            nn.Identity(),
         ).to(self.device)
 
         self.augmentator = nn.Sequential(
