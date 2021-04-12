@@ -110,9 +110,9 @@ class HW3Trainer():
         data_dict.y = data["label"].to(self.device)
         data_dict.index = data["index"]
 
-        data_dict.x = self.normalized(data_dict.x)
         if augment:
             data_dict.x = self.augmentator(data_dict.x)
+        data_dict.x = self.normalized(data_dict.x)
 
         return data_dict
 
