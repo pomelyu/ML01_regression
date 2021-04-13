@@ -263,7 +263,8 @@ class HW3Trainer():
         self.optimizer.zero_grad()
         data_dict = self.forward(data_dict)
 
-        B = self.cfg_dataset.batch_size // self.cfg_mixmatch.K
+        batch_unlabel = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
+        B = self.cfg_dataset.batch_size - batch_unlabel * self.cfg_mixmatch.K
         # First B are labeled
         loss_label = self.criterion_label(data_dict.y_pred[:B], torch.argmax(data_dict.y[:B], dim=-1))
         loss_unlabel = self.criterion_unlabel(data_dict.y_pred[B:], data_dict.y[B:])
@@ -314,6 +315,7 @@ class HW3Trainer():
         y /= K
         y = torch.pow(y, 1 / (self.cfg_mixmatch.T + 1e-5))
         y /= y.sum(-1, keepdim=True)
+        y = y.detach()
 
         result = AttrDict({})
         result.x = torch.cat(x, dim=0)
