@@ -5,6 +5,8 @@ import kornia as K
 import mlconfig
 import numpy as np
 import torch
+import torch.nn.functional as F
+import torchvision.models as tv_models
 from loguru import logger
 from mlconfig.collections import AttrDict
 from mlconfig.config import Config
@@ -454,6 +456,12 @@ def calculate_accuracy(pred, label_target):
     label_pred = torch.argmax(pred, dim=-1)
     acc = (label_pred == label_target).float().mean()
     return acc
+
+
+@mlconfig.register()
+def TorchVisionModels(model_name):
+    func = getattr(tv_models, model_name)
+    return func(pretrained=False, num_classes=11)
 
 
 @mlconfig.register()
