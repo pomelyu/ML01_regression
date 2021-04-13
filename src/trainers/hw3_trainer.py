@@ -37,12 +37,12 @@ class HW3Trainer():
 
         batch_size = self.cfg_dataset.batch_size
         num_workers = self.cfg_dataset.num_workers
-        batch_unlabel = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
-        batch_label = self.cfg_dataset.batch_size - batch_unlabel * self.cfg_mixmatch.K
-        self.train_dataloader = create_dataloader(create_dataset(self.cfg_dataset.train_dataset), batch_label, num_workers)
+        batch_u = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
+        batch_x = self.cfg_dataset.batch_size - batch_u * self.cfg_mixmatch.K
+        self.train_dataloader = create_dataloader(create_dataset(self.cfg_dataset.train_dataset), batch_x, num_workers)
         self.valid_dataloader = create_dataloader(create_dataset(self.cfg_dataset.valid_dataset), batch_size, num_workers)
         self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size, num_workers, shuffle=False)
-        unlabel_dataloader = create_dataloader(create_dataset(self.cfg_dataset.unlabeled_dataset), batch_unlabel, num_workers, drop_last=True)
+        unlabel_dataloader = create_dataloader(create_dataset(self.cfg_dataset.unlabeled_dataset), batch_u, num_workers, drop_last=True)
         self.unlabel_dataloader = InfiniteIteratorWrapper(unlabel_dataloader)
 
         self.normalized = nn.Sequential(
@@ -165,10 +165,10 @@ class HW3Trainer():
 
     @torch.no_grad()
     def on_epoch_begin(self):
-        self.train_state.train_loss = 0
-        self.train_state.train_metric = 0
+        self.train_state.loss_x = 0
+        self.train_state.loss_u = 0
         self.train_state.num_data = 0
-        self.train_state.train_sample = None
+        self.train_state.mixed_sample = None
 
         self.train_state.iter_pbar = tqdm(self.train_dataloader, total=len(self.train_dataloader), ascii=True)
 
@@ -177,20 +177,24 @@ class HW3Trainer():
     def on_epoch_end(self):
         self.save("latest", training_state=True)
 
-        train_loss = self.train_state.train_loss / self.train_state.num_data
-        train_metric = self.train_state.train_metric / self.train_state.num_data
+        loss_x = self.train_state.loss_x / self.train_state.num_data
+        loss_u = self.train_state.loss_u / self.train_state.num_data
 
-        self.exp_logger.log_metric("train_loss", train_loss, self.train_state.epoch)
-        self.exp_logger.log_metric("train_metric", train_metric, self.train_state.epoch)
-        self.exp_logger.log_image(self.train_state.epoch, self.train_state.train_sample, "train_sample", "jpg")
+        self.exp_logger.log_metric("loss_x", loss_x, self.train_state.epoch)
+        self.exp_logger.log_metric("loss_u", loss_u, self.train_state.epoch)
+        self.exp_logger.log_image(self.train_state.epoch, self.train_state.mixed_sample, "mixed_sample", "jpg")
 
         if self.train_state.epoch % self.cfg_trainer.epochs_eval != 0:
             return
 
+        train_loss, train_metric, train_sample = self.evaluate(self.train_dataloader, "train_dataset")
         valid_loss, valid_metric, valid_sample = self.evaluate(self.valid_dataloader, "valid_dataset")
 
+        self.exp_logger.log_metric("train_loss", train_loss, self.train_state.epoch)
         self.exp_logger.log_metric("valid_loss", valid_loss, self.train_state.epoch)
+        self.exp_logger.log_metric("train_metric", train_metric, self.train_state.epoch)
         self.exp_logger.log_metric("valid_metric", valid_metric, self.train_state.epoch)
+        self.exp_logger.log_image(self.train_state.epoch, train_sample, "train_sample", "jpg")
         self.exp_logger.log_image(self.train_state.epoch, valid_sample, "valid_sample", "jpg")
 
         if valid_loss >= self.train_state.best_valid and valid_metric <= self.train_state.best_metric:
@@ -243,15 +247,17 @@ class HW3Trainer():
         self.scheduler.step()
         self.model.eval()
 
-        if self.train_state.train_sample is None:
-            self.train_state.train_sample = self.show_prediction(data_dict)
+        if self.train_state.mixed_sample is None:
+            self.train_state.mixed_sample = self.show_prediction(data_dict)
 
         batch_size = len(data_dict.x)
-        self.train_state.train_loss += data_dict.loss.item() * batch_size
-        self.train_state.train_metric += calculate_accuracy(data_dict.y_pred, data_dict.y).item() * batch_size
+        self.train_state.loss_x += data_dict.loss_x.item() * batch_size
+        self.train_state.loss_u += data_dict.loss_u.item() * batch_size
         self.train_state.num_data += batch_size
 
-        self.train_state.iter_pbar.set_description(f"[{self.train_state.epoch:0>4d}] loss: {self.train_state.train_loss / self.train_state.num_data:.4f}")
+        loss_x = self.train_state.loss_x / self.train_state.num_data
+        loss_u = self.train_state.loss_u / self.train_state.num_data
+        self.train_state.iter_pbar.set_description(f"[{self.train_state.epoch:0>4d}] loss_x: {loss_x:.4f} loss_u: {loss_u:.4f}")
         self.train_state.iter_pbar.refresh()
 
         self.train_state.step += 1
@@ -263,17 +269,19 @@ class HW3Trainer():
         self.optimizer.zero_grad()
         data_dict = self.forward(data_dict)
 
-        batch_unlabel = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
-        B = self.cfg_dataset.batch_size - batch_unlabel * self.cfg_mixmatch.K
+        batch_u = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
+        batch_x = self.cfg_dataset.batch_size - batch_u * self.cfg_mixmatch.K
         # First B are labeled
-        loss_label = self.criterion_label(data_dict.y_pred[:B], torch.argmax(data_dict.y[:B], dim=-1))
-        loss_unlabel = self.criterion_unlabel(data_dict.y_pred[B:], data_dict.y[B:])
+        loss_x = self.criterion_label(data_dict.y_pred[:batch_x], torch.argmax(data_dict.y[:batch_x], dim=-1))
+        loss_u = self.criterion_unlabel(data_dict.y_pred[batch_x:], data_dict.y[batch_x:])
 
         lambda_unlabel = min(self.train_state.step / self.cfg_mixmatch.step_rampup, 1) * self.cfg_mixmatch.lambda_unlabel
-        loss = loss_label + lambda_unlabel * loss_unlabel
+        loss = loss_x + lambda_unlabel * loss_u
         loss.backward()
         self.optimizer.step()
 
+        data_dict.loss_x = loss_x.detach()
+        data_dict.loss_u = loss_u.detach()
         data_dict.loss = loss.detach()
         data_dict.y = torch.argmax(data_dict.y, dim=-1)
         return data_dict
