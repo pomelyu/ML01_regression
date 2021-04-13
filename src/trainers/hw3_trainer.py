@@ -24,7 +24,8 @@ class HW3Trainer():
         self.device = device
         self.exp_logger = exp_logger
 
-        self.epoch = 1
+        self.train_state = AttrDict({})
+        self.train_state.epoch = 1
 
         self.cfg_trainer = self.config_trainer(config.trainer)
         self.cfg_dataset = self.config_dataset(config.dataset)
@@ -121,85 +122,160 @@ class HW3Trainer():
         data_dict.y_pred = y_pred
         return data_dict
 
+
+    @torch.no_grad()
+    def on_train_begin(self):
+        self.train_state.best_valid = np.finfo(float).max
+        self.train_state.best_metric = 0
+        self.train_state.early_stop_count = 0
+        self.train_state.epoch_pbar = trange(1,  self.cfg_trainer.epochs + 1, ascii=True)
+        self.train_state.epoch_pbar.update(self.train_state.epoch)
+
+
+    @torch.no_grad()
+    def on_train_end(self):
+        self.model.eval()
+
+        self.model.load_state_dict(torch.load(self.exp_logger.tmp_dir / "best_loss.pth"))
+        result_file = self.inference(f"pred_best_loss_{self.meta.exp_id[:5]}")
+        self.exp_logger.log_artifact(result_file)
+
+        self.model.load_state_dict(torch.load(self.exp_logger.tmp_dir / "best_metric.pth"))
+        result_file = self.inference(f"pred_best_metric_{self.meta.exp_id[:5]}")
+        self.exp_logger.log_artifact(result_file)
+
+
+    @torch.no_grad()
+    def on_epoch_begin(self):
+        self.train_state.train_loss = 0
+        self.train_state.train_metric = 0
+        self.train_state.num_data = 0
+        self.train_state.train_sample = None
+
+        train_dataloader = create_dataloader(self.train_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers)
+        self.train_state.iter_pbar = tqdm(train_dataloader, total=len(train_dataloader), ascii=True)
+
+
+    @torch.no_grad()
+    def on_epoch_end(self):
+        train_loss = self.train_state.train_loss / self.train_state.num_data
+        train_metric = self.train_state.train_metric / self.train_state.num_data
+
+        self.exp_logger.log_metric("train_loss", train_loss, self.train_state.epoch)
+        self.exp_logger.log_metric("train_metric", train_metric, self.train_state.epoch)
+        self.exp_logger.log_image(self.train_state.epoch, self.train_state.train_sample, "train_sample", "jpg")
+
+        if self.train_state.epoch % self.cfg_trainer.epochs_eval != 0:
+            return
+
+        valid_loss, valid_metric, valid_sample = self.evaluate(self.valid_dataloader, "valid_dataset")
+
+        self.exp_logger.log_metric("valid_loss", valid_loss, self.train_state.epoch)
+        self.exp_logger.log_metric("valid_metric", valid_metric, self.train_state.epoch)
+        self.exp_logger.log_image(self.train_state.epoch, valid_sample, "valid_sample", "jpg")
+
+        if valid_loss >= self.train_state.best_valid and valid_metric <= self.train_state.best_metric:
+            self.train_state.early_stop_count += self.cfg_trainer.epochs_eval
+        else:
+            self.train_state.early_stop_count = 0
+            if valid_loss < self.train_state.best_valid:
+                self.train_state.best_valid = valid_loss
+                self.exp_logger.log_checkpoint(self.model.state_dict(), "best_loss.pth")
+
+            if valid_metric > self.train_state.best_metric:
+                self.train_state.best_metric = valid_metric
+                self.exp_logger.log_checkpoint(self.model.state_dict(), "best_metric.pth")
+
+        tqdm.write(
+            f"Epoch {self.train_state.epoch:0>5d}:" + \
+            f"lr: {self.optimizer.param_groups[0]['lr']:.5f}, " + \
+            f"train_loss: {train_loss:.5f}, " + \
+            f"valid_loss: {valid_loss:.5f}, " + \
+            f"train_metric: {train_metric:.5f}, " + \
+            f"valid_metric: {valid_metric:.5f}"
+        )
+
+        self.exp_logger.log_metric("best_valid", self.train_state.best_valid, self.train_state.epoch)
+        self.exp_logger.log_metric("best_metric", self.train_state.best_metric, self.train_state.epoch)
+            
+
+    @torch.no_grad()
+    def on_iteration_begin(self, data):
+        data_dict = self.prepare_data(data, augment=True)
+        self.model.train()
+        return data_dict
+
+
+    @torch.no_grad()
+    def on_iteration_end(self, data_dict):
+        self.scheduler.step()
+        self.model.eval()
+
+        if self.train_state.train_sample is None:
+            self.train_state.train_sample = self.show_prediction(data_dict)
+
+        batch_size = len(data_dict.x)
+        self.train_state.train_loss += data_dict.loss.item() * batch_size
+        self.train_state.train_metric += calculate_accuracy(data_dict.y_pred, data_dict.y).item() * batch_size
+        self.train_state.num_data += batch_size
+
+        self.train_state.iter_pbar.set_description(f"[{self.train_state.epoch:0>4d}] loss: {self.train_state.train_loss / self.train_state.num_data:.4f}")
+        self.train_state.iter_pbar.refresh()
+
+        return data_dict
+
+
+    def train_step(self, data_dict):
+        self.optimizer.zero_grad()
+        data_dict = self.forward(data_dict)
+        loss = self.criterion(data_dict.y_pred, data_dict.y)
+        loss.backward()
+        self.optimizer.step()
+
+        data_dict.loss = loss.detach()
+        return data_dict
+
+
     def fit(self):
-        pbar = trange(1,  self.cfg_trainer.epochs + 1, ascii=True)
-        pbar.update(self.epoch)
+        self.on_train_begin()
 
-        best_valid = np.finfo(float).max
-        best_metric = 0
-        early_stop_count = 0
+        for self.train_state.epoch in self.train_state.epoch_pbar:
+            self.on_epoch_begin()
 
-        for self.epoch in pbar:
-            train_dataloader = create_dataloader(self.train_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers)
+            for data in self.train_state.iter_pbar:
+                data_dict = self.on_iteration_begin(data)
+                data_dict = self.train_step(data_dict)
+                data_dict = self.on_iteration_end(data_dict)
 
-            train_loss = 0
-            train_metric = 0
-            train_sample = None
-            num_data = 0
-            tbar = tqdm(train_dataloader, total=len(train_dataloader), ascii=True)
-            for data in tbar:
-                data_dict = self.prepare_data(data, augment=True)
+            self.on_epoch_end()
 
-                self.optimizer.zero_grad()
-                data_dict = self.forward(data_dict)
-                loss = self.criterion(data_dict.y_pred, data_dict.y)
-                loss.backward()
-                self.optimizer.step()
-
-                with torch.no_grad():
-                    if train_sample is None:
-                        train_sample = self.show_prediction(data_dict)
-
-                    batch = len(data_dict.x)
-                    train_loss+= loss.item() * batch
-                    train_metric += calculate_accuracy(data_dict.y_pred, data_dict.y).item() * batch
-                    num_data += batch
-
-                    tbar.set_description(f"[{self.epoch:0>4d}] loss: {train_loss / num_data:.4f}")
-                    tbar.refresh()
-
-            self.scheduler.step()
-
-            train_loss /= num_data
-            train_metric /= num_data
-            self.exp_logger.log_metric("train_loss", train_loss, self.epoch)
-            self.exp_logger.log_metric("train_metric", train_metric, self.epoch)
-            self.exp_logger.log_image(self.epoch, train_sample, "train_sample", "jpg")
-
-            if self.epoch % self.cfg_trainer.epochs_eval != 0:
-                continue
-
-            valid_loss, valid_metric, valid_sample = self.evaluate(self.valid_dataloader, "valid_dataset")
-
-            self.exp_logger.log_metric("valid_loss", valid_loss, self.epoch)
-            self.exp_logger.log_metric("valid_metric", valid_metric, self.epoch)
-            self.exp_logger.log_image(self.epoch, valid_sample, "valid_sample", "jpg")
-
-            if valid_loss < best_valid:
-                tqdm.write(
-                    f"Epoch {self.epoch:0>5d}:" + \
-                    f"lr: {self.optimizer.param_groups[0]['lr']:.5f}, " + \
-                    f"train_loss: {train_loss:.5f}, " + \
-                    f"valid_loss: {valid_loss:.5f}, " + \
-                    f"train_metric: {train_metric:.5f}, " + \
-                    f"valid_metric: {valid_metric:.5f}"
-                )
-                best_valid = valid_loss
-                best_metric = valid_metric
-                self.exp_logger.log_checkpoint(self.model.state_dict(), "best.pth")
-                early_stop_count = 0
-            else:
-                early_stop_count += self.cfg_trainer.epochs_eval
-
-            self.exp_logger.log_metric("best_valid", best_valid, self.epoch)
-            self.exp_logger.log_metric("best_metric", best_metric, self.epoch)
-
-            if early_stop_count >= self.cfg_trainer.early_stop:
+            if self.train_state.early_stop_count >= self.cfg_trainer.early_stop:
                 break
 
-        self.model.load_state_dict(torch.load(self.exp_logger.tmp_dir / "best.pth"))
-        result_file = self.inference()
-        self.exp_logger.log_artifact(result_file)
+        self.on_train_end()
+
+
+    @torch.no_grad()
+    def create_unlabel_dataset(self, threshold=0.6):
+        labels = []
+        indexs = []
+        confs = []
+        dataloader = create_dataloader(self.unlabel_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers, shuffle=False)
+        for data in tqdm(dataloader, total=len(dataloader), ascii=True, desc=f"prepare unlabel dataset"):
+            data_dict = self.prepare_data(data)
+            data_dict = self.forward(data_dict)
+            score = torch.softmax(data_dict.y_pred, dim=-1)
+            confidence, label = torch.max(score, dim=-1)
+
+            good_index = torch.where(confidence >= threshold)[0]
+
+            labels += list(label.cpu().numpy())
+            indexs += list(data_dict.index[good_index].cpu().numpy())
+            confs += list(confidence.cpu().numpy())
+
+        self.unlabel_dataset.set_labels(labels, confs)
+        return Subset(self.unlabel_dataset, indexs)
+
 
     @torch.no_grad()
     def show_prediction(self, data_dict, num_data=16):
@@ -242,8 +318,8 @@ class HW3Trainer():
 
 
     @torch.no_grad()
-    def inference(self):
-        path = Path("results/pred.csv")
+    def inference(self, name):
+        path = Path(f"results/{name}.csv")
         f = path.open("w+")
         f.write("Id,Category")
 
