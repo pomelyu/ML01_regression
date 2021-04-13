@@ -33,13 +33,17 @@ class HW3Trainer():
         self.cfg_trainer = self.config_trainer(config.trainer)
         self.cfg_dataset = self.config_dataset(config.dataset)
         self.cfg_augmentator = self.config_augmentator(config.augmentator)
+        self.cfg_mixmatch = self.config_mixmatch(config.mixmatch)
 
         batch_size = self.cfg_dataset.batch_size
         num_workers = self.cfg_dataset.num_workers
-        self.train_dataset = create_dataset(self.cfg_dataset.train_dataset)
-        self.unlabel_dataset = create_dataset(self.cfg_dataset.unlabeled_dataset)
+        batch_unlabel = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
+        batch_label = self.cfg_dataset.batch_size - batch_unlabel * self.cfg_mixmatch.K
+        self.train_dataloader = create_dataloader(create_dataset(self.cfg_dataset.train_dataset), batch_label, num_workers)
         self.valid_dataloader = create_dataloader(create_dataset(self.cfg_dataset.valid_dataset), batch_size, num_workers)
         self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size, num_workers, shuffle=False)
+        unlabel_dataloader = create_dataloader(create_dataset(self.cfg_dataset.unlabeled_dataset), batch_unlabel, num_workers, drop_last=True)
+        self.unlabel_dataloader = InfiniteIteratorWrapper(unlabel_dataloader)
 
         self.normalized = nn.Sequential(
             nn.Identity(),
@@ -56,7 +60,8 @@ class HW3Trainer():
             K.augmentation.GaussianBlur(**self.cfg_augmentator.gaussian_blur),
         ).to(self.device)
 
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion_label = nn.CrossEntropyLoss()
+        self.criterion_unlabel = nn.MSELoss()
 
         self.model = config.model().to(self.device)
         self.optimizer = config.optimizer(self.model.parameters())
@@ -76,6 +81,17 @@ class HW3Trainer():
         config.set_immutable(False)
         config.setdefault("batch_size", 128)
         config.setdefault("num_worker", 0)
+        config.set_immutable(True)
+        return config
+
+    @classmethod
+    def config_mixmatch(cls, config: Config) -> Config:
+        config.set_immutable(False)
+        config.setdefault("T", 0.5)
+        config.setdefault("K", 2)
+        config.setdefault("alpha", 0.5)
+        config.setdefault("lambda_unlabel", 100)
+        config.setdefault("step_rampup", 16000)
         config.set_immutable(True)
         return config
 
@@ -110,9 +126,8 @@ class HW3Trainer():
 
     def prepare_data(self, data: dict, augment: bool = False) -> dict:
         data_dict = AttrDict()
-        data_dict.x = data["image"].to(self.device)
-        data_dict.y = data["label"].to(self.device)
-        data_dict.index = data["index"]
+        data_dict.x = data[0].to(self.device)
+        data_dict.y = data[1].to(self.device)
 
         if augment:
             data_dict.x = self.augmentator(data_dict.x)
@@ -155,8 +170,7 @@ class HW3Trainer():
         self.train_state.num_data = 0
         self.train_state.train_sample = None
 
-        train_dataloader = create_dataloader(self.train_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers)
-        self.train_state.iter_pbar = tqdm(train_dataloader, total=len(train_dataloader), ascii=True)
+        self.train_state.iter_pbar = tqdm(self.train_dataloader, total=len(self.train_dataloader), ascii=True)
 
 
     @torch.no_grad()
@@ -202,13 +216,26 @@ class HW3Trainer():
 
         self.exp_logger.log_metric("best_valid", self.train_state.best_valid, self.train_state.epoch)
         self.exp_logger.log_metric("best_metric", self.train_state.best_metric, self.train_state.epoch)
-  
+
 
     @torch.no_grad()
     def on_iteration_begin(self, data):
         data_dict = self.prepare_data(data, augment=True)
+        unlabel_data_dict = self.create_unlabel_data()
+
+        all_x = torch.cat([data_dict.x, unlabel_data_dict.x], dim=0)
+        all_y = torch.cat([label_to_onehot(data_dict.y, 11), unlabel_data_dict.y], dim=0)
+
+        L = np.random.beta(self.cfg_mixmatch.alpha, self.cfg_mixmatch.alpha)
+        L = max(L, 1-L)
+
+        shuffle_index = torch.randperm(len(all_x))
+        result = AttrDict({})
+        result.x = all_x * L + all_x[shuffle_index] * (1 - L)
+        result.y = all_y * L + all_y[shuffle_index] * (1 - L)
+
         self.model.train()
-        return data_dict
+        return result
 
 
     @torch.no_grad()
@@ -227,17 +254,27 @@ class HW3Trainer():
         self.train_state.iter_pbar.set_description(f"[{self.train_state.epoch:0>4d}] loss: {self.train_state.train_loss / self.train_state.num_data:.4f}")
         self.train_state.iter_pbar.refresh()
 
+        self.train_state.step += 1
+
         return data_dict
 
 
     def train_step(self, data_dict):
         self.optimizer.zero_grad()
         data_dict = self.forward(data_dict)
-        loss = self.criterion(data_dict.y_pred, data_dict.y)
+
+        B = self.cfg_dataset.batch_size // self.cfg_mixmatch.K
+        # First B are labeled
+        loss_label = self.criterion_label(data_dict.y_pred[:B], torch.argmax(data_dict.y[:B], dim=-1))
+        loss_unlabel = self.criterion_unlabel(data_dict.y_pred[B:], data_dict.y[B:])
+
+        lambda_unlabel = min(self.train_state.step / self.cfg_mixmatch.step_rampup, 1) * self.cfg_mixmatch.lambda_unlabel
+        loss = loss_label + lambda_unlabel * loss_unlabel
         loss.backward()
         self.optimizer.step()
 
         data_dict.loss = loss.detach()
+        data_dict.y = torch.argmax(data_dict.y, dim=-1)
         return data_dict
 
 
@@ -261,25 +298,28 @@ class HW3Trainer():
 
 
     @torch.no_grad()
-    def create_unlabel_dataset(self, threshold=0.6):
-        labels = []
-        indexs = []
-        confs = []
-        dataloader = create_dataloader(self.unlabel_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers, shuffle=False)
-        for data in tqdm(dataloader, total=len(dataloader), ascii=True, desc=f"prepare unlabel dataset"):
-            data_dict = self.prepare_data(data)
-            data_dict = self.forward(data_dict)
-            score = torch.softmax(data_dict.y_pred, dim=-1)
-            confidence, label = torch.max(score, dim=-1)
+    def create_unlabel_data(self):
+        K = self.cfg_mixmatch.K
+        x = []
+        y = 0
+        for _ in range(K):
+            data = next(self.unlabel_dataloader)
+            data_dict = self.prepare_data(data, augment=True)
+            x.append(data_dict.x)
+            y += torch.softmax(self.model(data_dict.x), dim=-1)
 
-            good_index = torch.where(confidence >= threshold)[0]
+        # x: (K, B, D, H, W)
+        # y: (B, C)
+        # sharpen
+        y /= K
+        y = torch.pow(y, 1 / (self.cfg_mixmatch.T + 1e-5))
+        y /= y.sum(-1, keepdim=True)
 
-            labels += list(label.cpu().numpy())
-            indexs += list(data_dict.index[good_index].cpu().numpy())
-            confs += list(confidence.cpu().numpy())
+        result = AttrDict({})
+        result.x = torch.cat(x, dim=0)
+        result.y = y.repeat(K, 1)
 
-        self.unlabel_dataset.set_labels(labels, confs)
-        return Subset(self.unlabel_dataset, indexs)
+        return result
 
 
     @torch.no_grad()
@@ -310,7 +350,7 @@ class HW3Trainer():
         for data in tqdm(dataloader, total=len(dataloader), ascii=True, desc=f"evaluate {name}"):
             data_dict = self.prepare_data(data)
             data_dict = self.forward(data_dict)
-            loss = self.criterion(data_dict.y_pred, data_dict.y)
+            loss = self.criterion_label(data_dict.y_pred, data_dict.y)
             losses.append(loss.item())
 
             metric = calculate_accuracy(data_dict.y_pred, data_dict.y)
@@ -393,23 +433,17 @@ def create_dataset(dataroot):
         transforms.Resize((128, 128)),
         transforms.ToTensor(),
     ])
-    return DatasetFolderWithIndex(dataroot, loader=lambda x: Image.open(x), extensions="jpg", transform=transform)
+    return DatasetFolder(dataroot, loader=lambda x: Image.open(x), extensions="jpg", transform=transform)
 
 
-def create_dataloader(dataset, batch_size, num_workers, shuffle=True):
-    return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
+def create_dataloader(dataset, batch_size, num_workers, shuffle=True, **kwargs):
+    return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, pin_memory=True, **kwargs)
 
 
 def calculate_accuracy(pred, label_target):
     label_pred = torch.argmax(pred, dim=-1)
     acc = (label_pred == label_target).float().mean()
     return acc
-
-
-class DatasetFolderWithIndex(DatasetFolder):
-    def __getitem__(self, index):
-        image, label = super().__getitem__(index)
-        return {"image": image, "label": label, "index": index}
 
 
 @mlconfig.register()
@@ -501,3 +535,26 @@ def draw_text(image, text,
     text_w, text_h = text_size
     cv2.rectangle(image, (x, y - text_h), (x + text_w, y), text_color_bg, -1)
     cv2.putText(image, text, pos, font, font_scale, text_color, font_thickness, bottomLeftOrigin=False)
+
+
+def label_to_onehot(label: torch.LongTensor, num_class: int) -> torch.FloatTensor:
+    if len(label.shape) == 1:
+        label = label.unsqueeze(-1)
+    result = torch.zeros(len(label), num_class, device=label.device, dtype=torch.float32)
+    result.scatter_(1, label, 1)
+    return result
+
+
+class InfiniteIteratorWrapper():
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.the_iter = iter(iterator)
+
+    def __next__(self):
+        try:
+            item = next(self.the_iter)
+        except StopIteration:
+            self.the_iter = iter(self.iterator)
+            item = next(self.the_iter)
+        return item
+            
