@@ -5,6 +5,8 @@ import kornia as K
 import mlconfig
 import numpy as np
 import torch
+import torch.nn.functional as F
+import torchvision.models as tv_models
 from loguru import logger
 from mlconfig.collections import AttrDict
 from mlconfig.config import Config
@@ -410,6 +412,12 @@ class DatasetFolderWithIndex(DatasetFolder):
     def __getitem__(self, index):
         image, label = super().__getitem__(index)
         return {"image": image, "label": label, "index": index}
+
+
+@mlconfig.register()
+def TorchVisionModels(model_name):
+    func = getattr(tv_models, model_name)
+    return func(pretrained=False, num_classes=11)
 
 
 @mlconfig.register()
