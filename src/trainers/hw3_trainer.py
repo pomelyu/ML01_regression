@@ -46,11 +46,11 @@ class HW3Trainer():
         self.unlabel_dataloader = InfiniteIteratorWrapper(unlabel_dataloader)
 
         self.normalized = nn.Sequential(
-            nn.Identity(),
+            K.augmentation.Normalize(mean=torch.FloatTensor([0.485, 0.456, 0.406]), std=torch.FloatTensor([0.229, 0.224, 0.225])),
         ).to(self.device)
 
         self.denormalized = nn.Sequential(
-            nn.Identity(),
+            K.augmentation.Denormalize(mean=torch.FloatTensor([0.485, 0.456, 0.406]), std=torch.FloatTensor([0.229, 0.224, 0.225])),
         ).to(self.device)
 
         self.augmentator = nn.Sequential(
