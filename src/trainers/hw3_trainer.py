@@ -314,17 +314,19 @@ class HW3Trainer():
 
         K = self.cfg_mixmatch.K
         x = []
-        y = 0
+        y = []
         data = next(self.unlabel_dataloader)
         for _ in range(K):
             data_dict = self.prepare_data(data, augment=True)
+            data_dict = self.forward(data_dict)
+
             x.append(data_dict.x)
-            y += torch.softmax(self.model(data_dict.x), dim=-1)
+            y.append(torch.softmax(data_dict.y_pred.detach(), dim=-1))
 
         # x: (K, B, D, H, W)
-        # y: (B, C)
+        # y: (K, B, C)
         # sharpen
-        y /= K
+        y = torch.stack(y, dim=0).mean(0)
         y = torch.pow(y, 1 / (self.cfg_mixmatch.T + 1e-5))
         y /= y.sum(-1, keepdim=True)
         y = y.detach()
@@ -350,9 +352,13 @@ class HW3Trainer():
         for img, pred, gt in zip(x, y_pred, y):
             draw_text(img, f"{gt:d}:{pred:d}", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
 
-        x = x.reshape((4, -1, *x.shape[1:]))
-        x = np.concatenate(x, axis=-2)
+        # (B, H, W, 3)
+        x = x.reshape((-1, 4, *x.shape[1:]))
+        # (B/4, 4, H, W, 3)
         x = np.concatenate(x, axis=-3)
+        # (4, H*B/4, W, 3)
+        x = np.concatenate(x, axis=-2)
+        # (H*B/4, W*4, 3)
 
         return x
 
