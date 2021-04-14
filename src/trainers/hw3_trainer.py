@@ -5,6 +5,7 @@ import kornia as K
 import mlconfig
 import numpy as np
 import torch
+from loguru import logger
 from mlconfig.collections import AttrDict
 from mlconfig.config import Config
 from PIL import Image
@@ -15,6 +16,7 @@ from torchvision.transforms import transforms
 from tqdm import tqdm, trange
 
 from src.utils.mlflow_logger import MLFlowLogger
+from src.utils.pytorch import get_state_dict, set_state_dict
 
 
 @mlconfig.register()
@@ -26,6 +28,7 @@ class HW3Trainer():
 
         self.train_state = AttrDict({})
         self.train_state.epoch = 1
+        self.train_state.step = 1
 
         self.cfg_trainer = self.config_trainer(config.trainer)
         self.cfg_dataset = self.config_dataset(config.dataset)
@@ -136,11 +139,11 @@ class HW3Trainer():
     def on_train_end(self):
         self.model.eval()
 
-        self.model.load_state_dict(torch.load(self.exp_logger.tmp_dir / "best_loss.pth"))
+        self.resume(self.exp_logger.tmp_dir / "best_loss.pth", training_state=False)
         result_file = self.inference(f"pred_best_loss_{self.meta.exp_id[:5]}")
         self.exp_logger.log_artifact(result_file)
 
-        self.model.load_state_dict(torch.load(self.exp_logger.tmp_dir / "best_metric.pth"))
+        self.resume(self.exp_logger.tmp_dir / "best_metric.pth", training_state=False)
         result_file = self.inference(f"pred_best_metric_{self.meta.exp_id[:5]}")
         self.exp_logger.log_artifact(result_file)
 
@@ -158,6 +161,8 @@ class HW3Trainer():
 
     @torch.no_grad()
     def on_epoch_end(self):
+        self.save("latest", training_state=True)
+
         train_loss = self.train_state.train_loss / self.train_state.num_data
         train_metric = self.train_state.train_metric / self.train_state.num_data
 
@@ -180,11 +185,11 @@ class HW3Trainer():
             self.train_state.early_stop_count = 0
             if valid_loss < self.train_state.best_valid:
                 self.train_state.best_valid = valid_loss
-                self.exp_logger.log_checkpoint(self.model.state_dict(), "best_loss.pth")
+                self.save("best_loss", training_state=True)
 
             if valid_metric > self.train_state.best_metric:
                 self.train_state.best_metric = valid_metric
-                self.exp_logger.log_checkpoint(self.model.state_dict(), "best_metric.pth")
+                self.save("best_metric", training_state=True)
 
         tqdm.write(
             f"Epoch {self.train_state.epoch:0>5d}:" + \
@@ -197,7 +202,7 @@ class HW3Trainer():
 
         self.exp_logger.log_metric("best_valid", self.train_state.best_valid, self.train_state.epoch)
         self.exp_logger.log_metric("best_metric", self.train_state.best_metric, self.train_state.epoch)
-            
+  
 
     @torch.no_grad()
     def on_iteration_begin(self, data):
@@ -334,6 +339,54 @@ class HW3Trainer():
 
         f.close()
         return path
+
+
+    @torch.no_grad()
+    def save(self, name: str = None, training_state: bool = True):
+        self.model.eval()
+        checkpoint = {
+            "model": get_state_dict(self.model),
+            "epoch": self.train_state.epoch,
+            "step": self.train_state.step,
+            "meta": self.meta,
+        }
+
+        self.exp_logger.log_checkpoint(checkpoint, f"{name}.pth")
+
+        if not training_state:
+            return
+
+        state_checkpoint = {"optimizer": get_state_dict(self.optimizer)}
+        self.exp_logger.log_checkpoint(state_checkpoint, f"{name}_optimizer.pth")
+
+
+    @torch.no_grad()
+    def resume(self, model_path: str, training_state: bool = False):
+        model_path = Path(model_path)
+
+        checkpoint = torch.load(model_path)
+        set_state_dict(self.model, checkpoint["model"])
+
+        next_epoch = checkpoint["epoch"] + 1
+        next_step = checkpoint["step"] + 1
+
+        del checkpoint
+        torch.cuda.empty_cache()
+        logger.info(f"Load model from: {model_path}")
+        if not training_state:
+            return
+
+        self.train_state.epoch = next_epoch
+        self.train_state.step = next_step
+
+        optimizer_path = f"{model_path.stem}_optimizer.{model_path.suffix}"
+        state_checkpoint = torch.load(optimizer_path)
+        set_state_dict(self.optimizer, state_checkpoint["optimizer"])
+
+        del state_checkpoint
+        torch.cuda.empty_cache()
+        logger.info(f"Load training state from: {optimizer_path}")
+
 
 def create_dataset(dataroot):
     transform = transforms.Compose([
