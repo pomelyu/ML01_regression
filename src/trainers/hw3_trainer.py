@@ -232,13 +232,14 @@ class HW3Trainer():
         all_x = torch.cat([data_dict.x, unlabel_data_dict.x], dim=0)
         all_y = torch.cat([label_to_onehot(data_dict.y, 11), unlabel_data_dict.y], dim=0)
 
-        L = np.random.beta(self.cfg_mixmatch.alpha, self.cfg_mixmatch.alpha)
-        L = max(L, 1-L)
+        L = np.random.beta(self.cfg_mixmatch.alpha, self.cfg_mixmatch.alpha, size=len(all_x))
+        L = np.stack([L, 1 - L], axis=0).max(0)
+        L = torch.FloatTensor(L).to(self.device)
 
         shuffle_index = torch.randperm(len(all_x))
         result = AttrDict({})
-        result.x = all_x * L + all_x[shuffle_index] * (1 - L)
-        result.y = all_y * L + all_y[shuffle_index] * (1 - L)
+        result.x = all_x * L[:, None, None, None] + all_x[shuffle_index] * (1 - L[:, None, None, None])
+        result.y = all_y * L[:, None] + all_y[shuffle_index] * (1 - L[:, None])
 
         self.model.train()
         return result
