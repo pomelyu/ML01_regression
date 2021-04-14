@@ -310,6 +310,8 @@ class HW3Trainer():
 
     @torch.no_grad()
     def create_unlabel_data(self):
+        self.model.eval()
+
         K = self.cfg_mixmatch.K
         x = []
         y = 0
