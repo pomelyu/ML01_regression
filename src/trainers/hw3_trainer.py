@@ -429,7 +429,7 @@ class HW3Trainer():
         self.train_state.epoch = next_epoch
         self.train_state.step = next_step
 
-        optimizer_path = f"{model_path.stem}_optimizer.{model_path.suffix}"
+        optimizer_path = model_path.with_name(f"{model_path.stem}_optimizer{model_path.suffix}")
         state_checkpoint = torch.load(optimizer_path)
         set_state_dict(self.optimizer, state_checkpoint["optimizer"])
 
