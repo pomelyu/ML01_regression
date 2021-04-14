@@ -315,8 +315,8 @@ class HW3Trainer():
         K = self.cfg_mixmatch.K
         x = []
         y = 0
+        data = next(self.unlabel_dataloader)
         for _ in range(K):
-            data = next(self.unlabel_dataloader)
             data_dict = self.prepare_data(data, augment=True)
             x.append(data_dict.x)
             y += torch.softmax(self.model(data_dict.x), dim=-1)
