@@ -99,11 +99,11 @@ class Trainer(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def save(self, name: Optional[str] = None, training_step=False):
+    def save(self, name: Optional[str] = None, training_state=False):
         raise NotImplementedError()
 
     @abstractmethod
-    def resume(self, model_path: str, training_step=False):
+    def resume(self, model_path: str, training_state=False):
         raise NotImplementedError()
 
     @staticmethod
