@@ -276,7 +276,7 @@ class HW3Trainer():
         batch_x = self.cfg_dataset.batch_size - batch_u * self.cfg_mixmatch.K
         # First B are labeled
         loss_x = self.criterion_label(data_dict.y_pred[:batch_x], torch.argmax(data_dict.y[:batch_x], dim=-1))
-        loss_u = self.criterion_unlabel(data_dict.y_pred[batch_x:], data_dict.y[batch_x:])
+        loss_u = self.criterion_unlabel(torch.softmax(data_dict.y_pred[batch_x:], dim=-1), data_dict.y[batch_x:])
 
         lambda_unlabel = min(self.train_state.step / self.cfg_mixmatch.step_rampup, 1) * self.cfg_mixmatch.lambda_unlabel
         loss = loss_x + lambda_unlabel * loss_u
