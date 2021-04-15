@@ -126,22 +126,6 @@ class HW3Trainer():
         config.set_immutable(True)
         return config
 
-    def prepare_data(self, data: dict, augment: bool = False) -> dict:
-        data_dict = AttrDict()
-        data_dict.x = data[0].to(self.device)
-        data_dict.y = data[1].to(self.device)
-
-        if augment:
-            data_dict.x = self.augmentator(data_dict.x)
-        data_dict.x = self.normalized(data_dict.x)
-
-        return data_dict
-
-    def forward(self, data_dict):
-        y_pred = self.model(data_dict.x)
-        data_dict.y_pred = y_pred
-        return data_dict
-
 
     @torch.no_grad()
     def on_train_begin(self):
@@ -241,72 +225,19 @@ class HW3Trainer():
         result.x = all_x * L[:, None, None, None] + all_x[shuffle_index] * (1 - L[:, None, None, None])
         result.y = all_y * L[:, None] + all_y[shuffle_index] * (1 - L[:, None])
 
-        self.model.train()
         return result
 
 
-    @torch.no_grad()
-    def on_iteration_end(self, data_dict):
-        self.scheduler.step()
-        self.model.eval()
+    def prepare_data(self, data: dict, augment: bool = False) -> dict:
+        data_dict = AttrDict()
+        data_dict.x = data[0].to(self.device)
+        data_dict.y = data[1].to(self.device)
 
-        if self.train_state.mixed_sample is None:
-            self.train_state.mixed_sample = self.show_prediction(data_dict)
-
-        batch_size = len(data_dict.x)
-        self.train_state.loss_x += data_dict.loss_x.item() * batch_size
-        self.train_state.loss_u += data_dict.loss_u.item() * batch_size
-        self.train_state.num_data += batch_size
-
-        loss_x = self.train_state.loss_x / self.train_state.num_data
-        loss_u = self.train_state.loss_u / self.train_state.num_data
-        self.train_state.iter_pbar.set_description(f"[{self.train_state.epoch:0>4d}] loss_x: {loss_x:.4f} loss_u: {loss_u:.4f}")
-        self.train_state.iter_pbar.refresh()
-
-        self.train_state.step += 1
+        if augment:
+            data_dict.x = self.augmentator(data_dict.x)
+        data_dict.x = self.normalized(data_dict.x)
 
         return data_dict
-
-
-    def train_step(self, data_dict):
-        self.optimizer.zero_grad()
-        data_dict = self.forward(data_dict)
-
-        batch_u = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
-        batch_x = self.cfg_dataset.batch_size - batch_u * self.cfg_mixmatch.K
-        # First B are labeled
-        loss_x = self.criterion_label(data_dict.y_pred[:batch_x], torch.argmax(data_dict.y[:batch_x], dim=-1))
-        loss_u = self.criterion_unlabel(torch.softmax(data_dict.y_pred[batch_x:], dim=-1), data_dict.y[batch_x:])
-
-        lambda_unlabel = min(self.train_state.step / self.cfg_mixmatch.step_rampup, 1) * self.cfg_mixmatch.lambda_unlabel
-        loss = loss_x + lambda_unlabel * loss_u
-        loss.backward()
-        self.optimizer.step()
-
-        data_dict.loss_x = loss_x.detach()
-        data_dict.loss_u = loss_u.detach()
-        data_dict.loss = loss.detach()
-        data_dict.y = torch.argmax(data_dict.y, dim=-1)
-        return data_dict
-
-
-    def fit(self):
-        self.on_train_begin()
-
-        for self.train_state.epoch in self.train_state.epoch_pbar:
-            self.on_epoch_begin()
-
-            for data in self.train_state.iter_pbar:
-                data_dict = self.on_iteration_begin(data)
-                data_dict = self.train_step(data_dict)
-                data_dict = self.on_iteration_end(data_dict)
-
-            self.on_epoch_end()
-
-            if self.train_state.early_stop_count >= self.cfg_trainer.early_stop:
-                break
-
-        self.on_train_end()
 
 
     @torch.no_grad()
@@ -338,6 +269,77 @@ class HW3Trainer():
 
         return result
 
+
+    def forward(self, data_dict):
+        y_pred = self.model(data_dict.x)
+        data_dict.y_pred = y_pred
+        return data_dict
+
+
+    def train_step(self, data_dict):
+        self.model.train()
+
+        self.optimizer.zero_grad()
+        data_dict = self.forward(data_dict)
+
+        batch_u = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
+        batch_x = self.cfg_dataset.batch_size - batch_u * self.cfg_mixmatch.K
+        # First B are labeled
+        loss_x = self.criterion_label(data_dict.y_pred[:batch_x], torch.argmax(data_dict.y[:batch_x], dim=-1))
+        loss_u = self.criterion_unlabel(torch.softmax(data_dict.y_pred[batch_x:], dim=-1), data_dict.y[batch_x:])
+
+        lambda_unlabel = min(self.train_state.step / self.cfg_mixmatch.step_rampup, 1) * self.cfg_mixmatch.lambda_unlabel
+        loss = loss_x + lambda_unlabel * loss_u
+        loss.backward()
+        self.optimizer.step()
+
+        data_dict.loss_x = loss_x.detach()
+        data_dict.loss_u = loss_u.detach()
+        data_dict.loss = loss.detach()
+        data_dict.y = torch.argmax(data_dict.y, dim=-1)
+        return data_dict
+
+
+    @torch.no_grad()
+    def on_iteration_end(self, data_dict):
+        self.scheduler.step()
+        self.model.eval()
+
+        if self.train_state.mixed_sample is None:
+            self.train_state.mixed_sample = self.show_prediction(data_dict)
+
+        batch_size = len(data_dict.x)
+        self.train_state.loss_x += data_dict.loss_x.item() * batch_size
+        self.train_state.loss_u += data_dict.loss_u.item() * batch_size
+        self.train_state.num_data += batch_size
+
+        loss_x = self.train_state.loss_x / self.train_state.num_data
+        loss_u = self.train_state.loss_u / self.train_state.num_data
+        self.train_state.iter_pbar.set_description(f"[{self.train_state.epoch:0>4d}] loss_x: {loss_x:.4f} loss_u: {loss_u:.4f}")
+        self.train_state.iter_pbar.refresh()
+
+        self.train_state.step += 1
+
+        return data_dict
+
+
+    def fit(self):
+        self.on_train_begin()
+
+        for self.train_state.epoch in self.train_state.epoch_pbar:
+            self.on_epoch_begin()
+
+            for data in self.train_state.iter_pbar:
+                data_dict = self.on_iteration_begin(data)
+                data_dict = self.train_step(data_dict)
+                data_dict = self.on_iteration_end(data_dict)
+
+            self.on_epoch_end()
+
+            if self.train_state.early_stop_count >= self.cfg_trainer.early_stop:
+                break
+
+        self.on_train_end()
 
     @torch.no_grad()
     def show_prediction(self, data_dict, num_data=16):
