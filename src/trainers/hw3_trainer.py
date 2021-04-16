@@ -12,7 +12,7 @@ from mlconfig.collections import AttrDict
 from mlconfig.config import Config
 from PIL import Image
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, Subset
 from torchvision.datasets import DatasetFolder
 from torchvision.transforms import transforms
 from tqdm import tqdm, trange
@@ -42,6 +42,7 @@ class HW3Trainer():
         self.unlabel_dataset = create_dataset(self.cfg_dataset.unlabeled_dataset)
         self.valid_dataloader = create_dataloader(create_dataset(self.cfg_dataset.valid_dataset), batch_size, num_workers)
         self.test_dataloader = create_dataloader(create_dataset(self.cfg_dataset.test_dataset), batch_size, num_workers, shuffle=False)
+        self.pseudo_dataset = None
 
         self.normalized = nn.Sequential(
             nn.Identity(),
@@ -69,6 +70,9 @@ class HW3Trainer():
         config.set_immutable(False)
         config.setdefault("epochs", 500)
         config.setdefault("epochs_eval", 10)
+        config.setdefault("epochs_update_unlabel", np.iinfo(int).max)
+        config.setdefault("unlabel_threshold", 0.6)
+        config.setdefault("unlabel_pred_times", 1)
         config.setdefault("early_stop", np.iinfo(int).max)
         config.set_immutable(True)
         return config
@@ -152,17 +156,28 @@ class HW3Trainer():
 
     @torch.no_grad()
     def on_epoch_begin(self):
+        self.model.eval()
+
         self.train_state.train_loss = 0
         self.train_state.train_metric = 0
         self.train_state.num_data = 0
         self.train_state.train_sample = None
 
-        train_dataloader = create_dataloader(self.train_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers)
+        if self.train_state.epoch != 1 and self.train_state.epoch % self.cfg_trainer.epochs_update_unlabel == 0:
+            self.pseudo_dataset = self.create_unlabel_dataset(self.cfg_trainer.unlabel_threshold)
+
+        if self.pseudo_dataset is not None:
+            dataset = ConcatDataset([self.train_dataset, self.pseudo_dataset])
+        else:
+            dataset = self.train_dataset
+
+        train_dataloader = create_dataloader(dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers)
         self.train_state.iter_pbar = tqdm(train_dataloader, total=len(train_dataloader), ascii=True)
 
 
     @torch.no_grad()
     def on_epoch_end(self):
+        self.model.eval()
         self.save("latest", training_state=True)
 
         train_loss = self.train_state.train_loss / self.train_state.num_data
@@ -233,6 +248,8 @@ class HW3Trainer():
 
 
     def train_step(self, data_dict):
+        self.model.train()
+
         self.optimizer.zero_grad()
         data_dict = self.forward(data_dict)
         loss = self.criterion(data_dict.y_pred, data_dict.y)
@@ -269,9 +286,13 @@ class HW3Trainer():
         confs = []
         dataloader = create_dataloader(self.unlabel_dataset, self.cfg_dataset.batch_size, self.cfg_dataset.num_workers, shuffle=False)
         for data in tqdm(dataloader, total=len(dataloader), ascii=True, desc=f"prepare unlabel dataset"):
-            data_dict = self.prepare_data(data)
-            data_dict = self.forward(data_dict)
-            score = torch.softmax(data_dict.y_pred, dim=-1)
+            score = []
+            for _ in range(self.cfg_trainer.unlabel_pred_times):
+                data_dict = self.prepare_data(data, augment=True)
+                data_dict = self.forward(data_dict)
+                score.append(torch.softmax(data_dict.y_pred, dim=-1))
+
+            score = torch.stack(score, 0).mean(0)
             confidence, label = torch.max(score, dim=-1)
 
             good_index = torch.where(confidence >= threshold)[0]
@@ -409,9 +430,22 @@ def calculate_accuracy(pred, label_target):
 
 
 class DatasetFolderWithIndex(DatasetFolder):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.override_labels = None
+        self.confs = None
+
     def __getitem__(self, index):
         image, label = super().__getitem__(index)
+        if self.override_labels is not None:
+            label = self.override_labels[index]
+
         return {"image": image, "label": label, "index": index}
+
+    def set_labels(self, new_labels, confs):
+        assert len(new_labels) == self.__len__()
+        self.override_labels = new_labels
+        self.confs = confs
 
 
 @mlconfig.register()
