@@ -510,7 +510,7 @@ class HW3MiniClassifier(nn.Module):
 
 @mlconfig.register()
 class HW3BasicClassifier(nn.Module):
-    def __init__(self):
+    def __init__(self, p=0):
         super().__init__()
         # The arguments for commonly used modules:
         # torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
@@ -521,23 +521,28 @@ class HW3BasicClassifier(nn.Module):
             nn.Conv2d(3, 64, 3, 1, 1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
+            nn.Dropout2d(p=p),
             nn.MaxPool2d(2, 2, 0),
 
             nn.Conv2d(64, 128, 3, 1, 1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
+            nn.Dropout2d(p=p),
             nn.MaxPool2d(2, 2, 0),
 
             nn.Conv2d(128, 256, 3, 1, 1),
             nn.BatchNorm2d(256),
             nn.ReLU(),
+            nn.Dropout2d(p=p),
             nn.MaxPool2d(4, 4, 0),
         )
         self.fc_layers = nn.Sequential(
             nn.Linear(256 * 8 * 8, 256),
             nn.ReLU(),
+            nn.Dropout(p=p),
             nn.Linear(256, 256),
             nn.ReLU(),
+            nn.Dropout(p=p),
             nn.Linear(256, 11)
         )
 
