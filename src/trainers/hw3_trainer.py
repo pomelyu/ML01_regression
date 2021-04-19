@@ -161,6 +161,7 @@ class HW3Trainer():
 
     @torch.no_grad()
     def on_epoch_end(self):
+        self.model.eval()
         self.save("latest", training_state=True)
 
         loss_x = self.train_state.loss_x / self.train_state.num_data
@@ -367,6 +368,8 @@ class HW3Trainer():
 
     @torch.no_grad()
     def evaluate(self, dataloader, name):
+        self.model.eval()
+
         losses = []
         matrics = []
         sample = None
@@ -387,6 +390,8 @@ class HW3Trainer():
 
     @torch.no_grad()
     def inference(self, name):
+        self.model.eval()
+
         path = Path(f"results/{name}.csv")
         f = path.open("w+")
         f.write("Id,Category")
