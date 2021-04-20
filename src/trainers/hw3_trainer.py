@@ -18,7 +18,7 @@ from torchvision.transforms import transforms
 from tqdm import tqdm, trange
 
 from src.utils.mlflow_logger import MLFlowLogger
-from src.utils.pytorch import get_state_dict, set_state_dict
+from src.utils.pytorch import get_state_dict, set_requires_grad, set_state_dict
 
 
 @mlconfig.register()
@@ -474,10 +474,41 @@ def calculate_accuracy(pred, label_target):
     return acc
 
 
+# https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
 @mlconfig.register()
-def TorchVisionModels(model_name):
+def TorchVisionModels(model_name: str, num_class: int, pretrained: bool = False, finetune: bool = False):
     func = getattr(tv_models, model_name)
-    return func(pretrained=False, num_classes=11)
+    if not pretrained and finetune:
+        raise RuntimeError("Finetuning the non-pretrained model makes no sense")
+
+    if not pretrained and not finetune:
+        return func(pretrained=False, num_class=num_class)
+
+    model = func(pretrained=pretrained)
+    if finetune:
+        set_requires_grad(model, False)
+
+    if "resnet" in model_name:
+        num_ftrs = model.fc.in_features
+        model.fc = nn.Linear(num_ftrs, num_class)
+        return model
+
+    if "alexnet" in model_name:
+        num_ftrs = model.classifier[6].in_features
+        model.classifier[6] = nn.Linear(num_ftrs, num_class)
+        return model
+
+    if "vgg" in model_name:
+        num_ftrs = model.classifier[6].in_features
+        model.classifier[6] = nn.Linear(num_ftrs, num_class)
+        return model
+
+    if "densenet" in model_name:
+        num_ftrs = model.classifier.in_features
+        model.classifier = nn.Linear(num_ftrs, num_class)
+        return model
+
+    raise NotImplementedError()
 
 
 @mlconfig.register()
