@@ -62,7 +62,7 @@ class HW3Trainer():
             K.augmentation.GaussianBlur(**self.cfg_augmentator.gaussian_blur),
         ).to(self.device)
 
-        self.criterion_label = nn.CrossEntropyLoss()
+        self.criterion_label = CrossEntropyLoss()
         self.criterion_unlabel = nn.MSELoss()
 
         self.model = config.model().to(self.device)
@@ -215,7 +215,7 @@ class HW3Trainer():
         unlabel_data_dict = self.create_unlabel_data()
 
         all_x = torch.cat([data_dict.x, unlabel_data_dict.x], dim=0)
-        all_y = torch.cat([label_to_onehot(data_dict.y, 11), unlabel_data_dict.y], dim=0)
+        all_y = torch.cat([data_dict.y, unlabel_data_dict.y], dim=0)
 
         L = np.random.beta(self.cfg_mixmatch.alpha, self.cfg_mixmatch.alpha, size=len(all_x))
         L = np.stack([L, 1 - L], axis=0).max(0)
@@ -233,6 +233,7 @@ class HW3Trainer():
         data_dict = AttrDict()
         data_dict.x = data[0].to(self.device)
         data_dict.y = data[1].to(self.device)
+        data_dict.y = label_to_onehot(data_dict.y, 11)
 
         if augment:
             data_dict.x = self.augmentator(data_dict.x)
@@ -286,7 +287,7 @@ class HW3Trainer():
         batch_u = self.cfg_dataset.batch_size // (self.cfg_mixmatch.K + 1)
         batch_x = self.cfg_dataset.batch_size - batch_u * self.cfg_mixmatch.K
         # First B are labeled
-        loss_x = self.criterion_label(data_dict.y_pred[:batch_x], torch.argmax(data_dict.y[:batch_x], dim=-1))
+        loss_x = self.criterion_label(data_dict.y_pred[:batch_x], data_dict.y[:batch_x])
         loss_u = self.criterion_unlabel(torch.softmax(data_dict.y_pred[batch_x:], dim=-1), data_dict.y[batch_x:])
 
         lambda_unlabel = min(self.train_state.step / self.cfg_mixmatch.step_rampup, 1) * self.cfg_mixmatch.lambda_unlabel
@@ -297,7 +298,6 @@ class HW3Trainer():
         data_dict.loss_x = loss_x.detach()
         data_dict.loss_u = loss_u.detach()
         data_dict.loss = loss.detach()
-        data_dict.y = torch.argmax(data_dict.y, dim=-1)
         return data_dict
 
 
@@ -351,7 +351,7 @@ class HW3Trainer():
         x: np.ndarray = K.tensor_to_image(x).astype(np.uint8)
         x = np.ascontiguousarray(x)
         y_pred = torch.argmax(data_dict.y_pred[:num_data], dim=-1).detach().cpu().numpy()
-        y = data_dict.y[:num_data].cpu().numpy()
+        y = torch.argmax(data_dict.y[:num_data], dim=-1).cpu().numpy()
 
         for img, pred, gt in zip(x, y_pred, y):
             draw_text(img, f"{gt:d}:{pred:d}", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
@@ -379,7 +379,7 @@ class HW3Trainer():
             loss = self.criterion_label(data_dict.y_pred, data_dict.y)
             losses.append(loss.item())
 
-            metric = calculate_accuracy(data_dict.y_pred, data_dict.y)
+            metric = calculate_accuracy(data_dict.y_pred, torch.argmax(data_dict.y, dim=-1))
             matrics.append(metric.item())
 
             if sample is None:
@@ -627,4 +627,19 @@ class InfiniteIteratorWrapper():
             self.the_iter = iter(self.iterator)
             item = next(self.the_iter)
         return item
-            
+
+
+class CrossEntropyLoss(nn.Module):
+    def __init__(self, reduction="mean"):
+        super().__init__()
+        self.reduction = reduction
+
+    def __call__(self, input, target):
+        assert input.shape == target.shape
+        loss = - torch.sum(target * torch.log_softmax(input, dim=-1), dim=-1)
+        if self.reduction == "none":
+            return loss
+        if self.reduction == "sum":
+            return loss.sum()
+        if self.reduction == "mean":
+            return loss.mean()
