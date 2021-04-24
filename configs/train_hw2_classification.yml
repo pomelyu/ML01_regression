@@ -1,0 +1,40 @@
+exp_name: HW2-classification
+run_name: Attention-RAdam
+record_folder: null
+
+trainer:
+  name: ClassificationTrainer
+  epochs: 20
+  early_stop: 5
+
+model:
+  in_nc: 39
+  out_nc: 39
+  nd_qk: 128
+  nd_v: 128
+  n_frames: 11
+  n_attentions: 2
+  nd_mlp: 256
+  n_res_linears: 2
+
+dataset:
+  dataroot: data/timit_11
+  valid_ratio: 0.2
+  batch_size: 64
+
+optimizer:
+  name: RAdam
+  lr: 0.0001
+
+scheduler:
+  name: StepLR
+  step_size: 5
+  gamma: 0.1
+
+log_params:
+  dataset.batch_size: $dataset.batch_size
+
+  optim: $optimizer.name
+  optim.lr: $optimizer.lr
+  
+  scheduler: $scheduler.name
