@@ -1,0 +1,57 @@
+exp_name: HW3-CNN
+run_name: mobilenet
+record_folder: null
+
+trainer:
+  name: HW3Trainer
+  epochs: 80
+  epochs_eval: 1
+  epochs_update_unlabel: 100000
+  unlabel_threshold: 0.7
+  # early_stop: 20
+
+model:
+  # name: HW3BasicClassifier
+  name: TorchVisionModels
+  model_name: vgg11_bn
+
+dataset:
+  train_dataset: data/food-11/training/labeled
+  unlabeled_dataset: data/food-11/training/unlabeled
+  valid_dataset: data/food-11/validation
+  test_dataset: data/food-11/testing
+  batch_size: 128
+  num_workers: 4
+
+augmentator:
+  random_affine:
+    p: 0.8
+    degrees: 180
+    shear: 0.1
+  color_jitter:
+    p: 0.5
+    brightness: 0.3
+    contrast: 0.1
+    saturation: 0.1
+  gaussian_blur:
+    p: 0
+
+optimizer:
+  name: Adam
+  lr: 0.0003
+  weight_decay: 0
+
+scheduler:
+  name: StepLR
+  step_size: 200
+  gamma: 1
+
+log_params:
+  dataset.batch_size: $dataset.batch_size
+
+  model.name: $model.name
+
+  optim: $optimizer.name
+  optim.lr: $optimizer.lr
+  
+  scheduler: $scheduler.name

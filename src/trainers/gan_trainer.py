@@ -158,8 +158,8 @@ class GANTrainer(Trainer):
     def validation_step(self):
         raise NotImplementedError()
 
-    def save(self, name: Optional[str] = None, training_step=False):
+    def save(self, name: Optional[str] = None, training_state=False):
         raise NotImplementedError()
 
-    def resume(self, model_path: str, training_step=False):
+    def resume(self, model_path: str, training_state=False):
         raise NotImplementedError()
